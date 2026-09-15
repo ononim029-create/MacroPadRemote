@@ -3,6 +3,8 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 permissions:
   contents: write
 jobs:
@@ -45,8 +47,14 @@ jobs:
           from pathlib import Path
           p=Path('build-mobile/android/app/src/main/AndroidManifest.xml')
           s=p.read_text()
+          marker='<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+          permissions=[]
           if 'android.permission.INTERNET' not in s:
-              s=s.replace('<manifest xmlns:android="http://schemas.android.com/apk/res/android">','<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>')
+              permissions.append('    <uses-permission android:name="android.permission.INTERNET"/>')
+          if 'android.permission.CAMERA' not in s:
+              permissions.append('    <uses-permission android:name="android.permission.CAMERA"/>')
+          if permissions:
+              s=s.replace(marker, marker+'\n'+'\n'.join(permissions))
           s=s.replace('<application','<application android:usesCleartextTraffic="true"',1)
           p.write_text(s)
           PY
@@ -62,7 +70,7 @@ jobs:
           name: MacroPadRemote-android
           path: build-mobile/build/app/outputs/flutter-apk/app-release.apk
   preview:
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [windows, android]
     runs-on: ubuntu-latest
     steps:
@@ -81,7 +89,7 @@ jobs:
           ZIP=artifacts/windows/MacroPadRemote-win-x64.zip
           SHA=$(sha256sum "$ZIP" | awk '{print $1}')
           cat > preview.json <<JSON
-          {"version":"0.5.0-preview","channel":"preview","packageUrl":"https://github.com/${GH_REPO}/releases/download/preview/MacroPadRemote-win-x64.zip","sha256":"${SHA}","mandatory":false,"notes":"MacroPad Remote preview"}
+          {"version":"0.5.1-preview","channel":"preview","packageUrl":"https://github.com/${GH_REPO}/releases/download/preview/MacroPadRemote-win-x64.zip","sha256":"${SHA}","mandatory":false,"notes":"MacroPad Remote v0.5.1 UI feedback preview"}
           JSON
       - name: Publish rolling preview
         env:
