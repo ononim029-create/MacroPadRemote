@@ -16,7 +16,9 @@ jobs:
       - name: Publish Windows x64
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           dotnet publish src/windows/MacroPadRemote/MacroPadRemote.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist/windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Compress-Archive -Path dist/windows/* -DestinationPath dist/MacroPadRemote-win-x64.zip -Force
       - uses: actions/upload-artifact@v4
         with:
@@ -34,10 +36,11 @@ jobs:
       - name: Create Android host
         shell: bash
         run: |
-          mkdir -p build-mobile
+          rm -rf build-mobile
           flutter create build-mobile --platforms android --project-name macropad_remote
           cp src/mobile/macropad_mobile/pubspec.yaml build-mobile/pubspec.yaml
           cp src/mobile/macropad_mobile/lib/main.dart build-mobile/lib/main.dart
+          rm -rf build-mobile/test
           python3 - <<'PY'
           from pathlib import Path
           p=Path('build-mobile/android/app/src/main/AndroidManifest.xml')
