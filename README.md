@@ -25,3 +25,5 @@ Every push to `main` triggers `.github/workflows/release.yml`. When both platfor
 - `preview.json`
 
 The preview channel is intended for device testing before the first stable release.
+
+CI bootstrap initialized.
