@@ -47,8 +47,14 @@ jobs:
           from pathlib import Path
           p=Path('build-mobile/android/app/src/main/AndroidManifest.xml')
           s=p.read_text()
+          marker='<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+          permissions=[]
           if 'android.permission.INTERNET' not in s:
-              s=s.replace('<manifest xmlns:android="http://schemas.android.com/apk/res/android">','<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>')
+              permissions.append('    <uses-permission android:name="android.permission.INTERNET"/>')
+          if 'android.permission.CAMERA' not in s:
+              permissions.append('    <uses-permission android:name="android.permission.CAMERA"/>')
+          if permissions:
+              s=s.replace(marker, marker+'\n'+'\n'.join(permissions))
           s=s.replace('<application','<application android:usesCleartextTraffic="true"',1)
           p.write_text(s)
           PY
