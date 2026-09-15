@@ -1,0 +1,171 @@
+name: Build MacroPad Remote
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Expand source bundle
+        shell: pwsh
+        run: Expand-Archive -Path source-bundle.zip -DestinationPath . -Force
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+      - name: Build native updater
+        shell: pwsh
+        run: |
+          Push-Location updater
+          go build -ldflags="-s -w" -o ../pc/MacroPad.Pc/MacroPadRemote.Updater.exe main.go
+          Pop-Location
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build Windows x64
+        shell: pwsh
+        run: ./scripts/build-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MacroPadRemote-win-x64
+          path: |
+            release/MacroPadRemote-win-x64.zip
+            release/win-x64/**
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Expand source bundle
+        shell: bash
+        run: unzip -o source-bundle.zip
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Create Android host
+        shell: bash
+        run: |
+          cd mobile/macropad_mobile
+          flutter create . --platforms android
+          cd ../..
+          chmod +x scripts/prepare-android.sh
+          ./scripts/prepare-android.sh
+      - name: Analyze and build Android APK
+        shell: bash
+        run: |
+          cd mobile/macropad_mobile
+          flutter pub get
+          flutter analyze
+          flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MacroPadRemote-android
+          path: mobile/macropad_mobile/build/app/outputs/flutter-apk/app-release.apk
+
+  preview:
+    if: github.ref == 'refs/heads/main'
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Expand source bundle
+        shell: bash
+        run: unzip -o source-bundle.zip
+      - uses: actions/download-artifact@v4
+        with:
+          name: MacroPadRemote-win-x64
+          path: artifacts/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: MacroPadRemote-android
+          path: artifacts/android
+      - name: Build preview update manifest
+        env:
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          ZIP="artifacts/windows/MacroPadRemote-win-x64.zip"
+          SHA=$(sha256sum "$ZIP" | awk '{print $1}')
+          VERSION=$(grep -oPm1 '(?<=<InformationalVersion>)[^<]+' pc/MacroPad.Pc/MacroPad.Pc.csproj)
+          URL="https://github.com/${GH_REPO}/releases/download/preview/MacroPadRemote-win-x64.zip"
+          cat > preview.json <<JSON
+          {
+            "version": "${VERSION}",
+            "channel": "preview",
+            "packageUrl": "${URL}",
+            "sha256": "${SHA}",
+            "mandatory": false,
+            "notes": "MacroPad Remote preview ${VERSION}"
+          }
+          JSON
+      - name: Publish rolling preview release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if ! gh release view preview >/dev/null 2>&1; then
+            gh release create preview --prerelease --title "MacroPad Remote Preview" --notes "Rolling preview build from main."
+          fi
+          gh release upload preview \
+            artifacts/windows/MacroPadRemote-win-x64.zip \
+            artifacts/android/app-release.apk \
+            preview.json \
+            --clobber
+          gh release edit preview --title "MacroPad Remote Preview" --notes "Latest preview build from main: ${GITHUB_SHA}."
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Expand source bundle
+        shell: bash
+        run: unzip -o source-bundle.zip
+      - uses: actions/download-artifact@v4
+        with:
+          name: MacroPadRemote-win-x64
+          path: artifacts/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: MacroPadRemote-android
+          path: artifacts/android
+      - name: Create stable update manifest
+        env:
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          ZIP="artifacts/windows/MacroPadRemote-win-x64.zip"
+          SHA=$(sha256sum "$ZIP" | awk '{print $1}')
+          VERSION="${TAG#v}"
+          URL="https://github.com/${GH_REPO}/releases/download/${TAG}/MacroPadRemote-win-x64.zip"
+          cat > stable.json <<JSON
+          {
+            "version": "${VERSION}",
+            "channel": "stable",
+            "packageUrl": "${URL}",
+            "sha256": "${SHA}",
+            "mandatory": false,
+            "notes": "MacroPad Remote ${VERSION}"
+          }
+          JSON
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            artifacts/windows/MacroPadRemote-win-x64.zip \
+            artifacts/android/app-release.apk \
+            stable.json \
+            --generate-notes
