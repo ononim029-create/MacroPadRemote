@@ -86,6 +86,14 @@ jobs:
       - name: Publish rolling preview
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          if ! gh release view preview >/dev/null 2>&1; then gh release create preview --prerelease --title "MacroPad Remote Preview" --notes "Rolling preview build"; fi
-          gh release upload preview artifacts/windows/MacroPadRemote-win-x64.zip artifacts/android/app-release.apk preview.json --clobber
+          if ! gh release view preview --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release create preview --repo "$GH_REPO" --prerelease --title "MacroPad Remote Preview" --notes "Rolling preview build"
+          fi
+          gh release upload preview \
+            artifacts/windows/MacroPadRemote-win-x64.zip \
+            artifacts/android/app-release.apk \
+            preview.json \
+            --clobber \
+            --repo "$GH_REPO"
