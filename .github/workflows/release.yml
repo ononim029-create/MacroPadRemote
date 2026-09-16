@@ -11,7 +11,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Restore v0.6.1 Windows sources
         shell: pwsh
         run: |
@@ -56,7 +56,7 @@ jobs:
           } finally { $inputStream.Dispose() }
           git apply --whitespace=nowarn $patchFile
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
       - name: Publish Windows x64
@@ -66,7 +66,7 @@ jobs:
           dotnet publish src/windows/MacroPadRemote/MacroPadRemote.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist/windows
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Compress-Archive -Path dist/windows/* -DestinationPath dist/MacroPadRemote-win-x64.zip -Force
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: MacroPadRemote-win-x64
           path: |
@@ -76,7 +76,7 @@ jobs:
   android:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Restore v0.6.1 mobile sources
         shell: bash
         run: |
@@ -153,7 +153,7 @@ jobs:
           flutter pub get
           flutter analyze
           flutter build apk --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: MacroPadRemote-android
           path: build-mobile/build/app/outputs/flutter-apk/app-release.apk
@@ -163,11 +163,11 @@ jobs:
     needs: [windows, android]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: MacroPadRemote-win-x64
           path: artifacts/windows
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: MacroPadRemote-android
           path: artifacts/android
