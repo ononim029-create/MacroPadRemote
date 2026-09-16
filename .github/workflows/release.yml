@@ -103,7 +103,7 @@ jobs:
           p.write_text(s)
           PY
 
-          base64 -d bootstrap/v061_mobile_repo.patch.gz.b64 > /tmp/v061-mobile.patch.gz
+          cat bootstrap/v061mob_part_* | base64 -d > /tmp/v061-mobile.patch.gz
           gzip -dc /tmp/v061-mobile.patch.gz > /tmp/v061-mobile.patch
           git apply --whitespace=nowarn /tmp/v061-mobile.patch
       - uses: subosito/flutter-action@v2
