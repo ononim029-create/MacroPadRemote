@@ -41,6 +41,11 @@ jobs:
           '@
           $cs = $cs.Replace($old, $new.Trim())
           Set-Content -Path $csPath -Value $cs -Encoding utf8 -NoNewline
+      - name: Upload restored Windows source
+        uses: actions/upload-artifact@v4
+        with:
+          name: v06-windows-source
+          path: src/windows/MacroPadRemote/**
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
@@ -85,6 +90,11 @@ jobs:
           s=s.replace('final columns = rawColumns.clamp(1, 12);', 'final columns = rawColumns.clamp(1, 12).toInt();')
           p.write_text(s)
           PY
+      - name: Upload restored mobile source
+        uses: actions/upload-artifact@v4
+        with:
+          name: v06-mobile-source
+          path: src/mobile/macropad_mobile/**
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
