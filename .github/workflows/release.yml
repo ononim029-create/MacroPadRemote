@@ -77,6 +77,7 @@ jobs:
           s=s.replace('await UniversalBle.unsubscribe(device.deviceId, serviceUuid, stateUuid);', "if (state != null) await state!.unsubscribe();")
           s=s.replace('command = await device.getCharacteristic(serviceUuid, commandUuid);', 'command = await device.getCharacteristic(commandUuid, service: serviceUuid);')
           s=s.replace('state = await device.getCharacteristic(serviceUuid, stateUuid);', 'state = await device.getCharacteristic(stateUuid, service: serviceUuid);')
+          s=s.replace('separatorBuilder: (_, __)', 'separatorBuilder: (_, _)')
           s=s.replace('final columns = p.columns.clamp(1, 12);', 'final columns = p.columns.clamp(1, 12).toInt();')
           s=s.replace("rowSpan: ((json['rowSpan'] as num?)?.toInt() ?? 1).clamp(1, 12),", "rowSpan: ((json['rowSpan'] as num?)?.toInt() ?? 1).clamp(1, 12).toInt(),")
           s=s.replace("columnSpan: ((json['columnSpan'] as num?)?.toInt() ?? 1).clamp(1, 12),", "columnSpan: ((json['columnSpan'] as num?)?.toInt() ?? 1).clamp(1, 12).toInt(),")
