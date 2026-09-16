@@ -12,6 +12,50 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Restore v0.6.1 Windows sources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $parts = Get-ChildItem bootstrap/v06_payload_0* | Sort-Object Name
+          $b64 = ($parts | ForEach-Object { Get-Content $_.FullName -Raw }) -join ''
+          $archive = Join-Path $env:RUNNER_TEMP 'v06.tar.gz'
+          [IO.File]::WriteAllBytes($archive, [Convert]::FromBase64String($b64))
+          $src = Join-Path $env:RUNNER_TEMP 'v06src'
+          New-Item -ItemType Directory -Force $src | Out-Null
+          tar -xzf $archive -C $src
+          Copy-Item "$src/App.xaml" src/windows/MacroPadRemote/App.xaml -Force
+          Copy-Item "$src/MainWindow.xaml" src/windows/MacroPadRemote/MainWindow.xaml -Force
+          Copy-Item "$src/MainWindow.xaml.cs" src/windows/MacroPadRemote/MainWindow.xaml.cs -Force
+          Copy-Item "$src/MacroPadRemote.csproj" src/windows/MacroPadRemote/MacroPadRemote.csproj -Force
+          Copy-Item "$src/LanDiscoveryService.cs" src/windows/MacroPadRemote/LanDiscoveryService.cs -Force
+          Copy-Item "$src/BleGattServer.cs" src/windows/MacroPadRemote/BleGattServer.cs -Force
+
+          $csPath = 'src/windows/MacroPadRemote/MainWindow.xaml.cs'
+          $cs = Get-Content $csPath -Raw
+          $old = 'if (tile is not null) await Dispatcher.InvokeAsync(async () => await ExecuteTileAsync(tile));'
+          $new = @'
+          if (tile is not null)
+                          {
+                              var executeTask = await Dispatcher.InvokeAsync(() => ExecuteTileAsync(tile));
+                              await executeTask;
+                          }
+          '@
+          $cs = $cs.Replace($old, $new.Trim())
+          Set-Content -Path $csPath -Value $cs -Encoding utf8 -NoNewline
+
+          $patchGz = Join-Path $env:RUNNER_TEMP 'v061-win.patch.gz'
+          [IO.File]::WriteAllBytes($patchGz, [Convert]::FromBase64String((Get-Content bootstrap/v061_windows_repo.patch.gz.b64 -Raw)))
+          $patchFile = Join-Path $env:RUNNER_TEMP 'v061-win.patch'
+          $inputStream = [IO.File]::OpenRead($patchGz)
+          try {
+            $gzipStream = [IO.Compression.GZipStream]::new($inputStream, [IO.Compression.CompressionMode]::Decompress)
+            try {
+              $outputStream = [IO.File]::Create($patchFile)
+              try { $gzipStream.CopyTo($outputStream) } finally { $outputStream.Dispose() }
+            } finally { $gzipStream.Dispose() }
+          } finally { $inputStream.Dispose() }
+          git apply --whitespace=nowarn $patchFile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
@@ -28,16 +72,47 @@ jobs:
           path: |
             dist/MacroPadRemote-win-x64.zip
             dist/windows/**
+
   android:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Restore v0.6.1 mobile sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat bootstrap/v06_payload_0* | base64 -d > /tmp/v06.tar.gz
+          rm -rf /tmp/v06src && mkdir -p /tmp/v06src
+          tar -xzf /tmp/v06.tar.gz -C /tmp/v06src
+          cp /tmp/v06src/pubspec.yaml src/mobile/macropad_mobile/pubspec.yaml
+          cp /tmp/v06src/main.dart src/mobile/macropad_mobile/lib/main.dart
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/mobile/macropad_mobile/lib/main.dart')
+          s=p.read_text()
+          s=s.replace('await UniversalBle.unsubscribe(device.deviceId, serviceUuid, stateUuid);', "if (state != null) await state!.unsubscribe();")
+          s=s.replace('command = await device.getCharacteristic(serviceUuid, commandUuid);', 'command = await device.getCharacteristic(commandUuid, service: serviceUuid);')
+          s=s.replace('state = await device.getCharacteristic(serviceUuid, stateUuid);', 'state = await device.getCharacteristic(stateUuid, service: serviceUuid);')
+          s=s.replace('separatorBuilder: (_, __)', 'separatorBuilder: (_, _)')
+          s=s.replace('final columns = p.columns.clamp(1, 12);', 'final columns = p.columns.clamp(1, 12).toInt();')
+          s=s.replace("rowSpan: ((json['rowSpan'] as num?)?.toInt() ?? 1).clamp(1, 12),", "rowSpan: ((json['rowSpan'] as num?)?.toInt() ?? 1).clamp(1, 12).toInt(),")
+          s=s.replace("columnSpan: ((json['columnSpan'] as num?)?.toInt() ?? 1).clamp(1, 12),", "columnSpan: ((json['columnSpan'] as num?)?.toInt() ?? 1).clamp(1, 12).toInt(),")
+          s=s.replace('final rows = rawRows.clamp(1, 12);', 'final rows = rawRows.clamp(1, 12).toInt();')
+          s=s.replace('final columns = rawColumns.clamp(1, 12);', 'final columns = rawColumns.clamp(1, 12).toInt();')
+          p.write_text(s)
+          PY
+
+          cat bootstrap/v061mob_part_* | base64 -d > /tmp/v061-mobile.patch.gz
+          gzip -dc /tmp/v061-mobile.patch.gz > /tmp/v061-mobile.patch
+          git apply --whitespace=nowarn /tmp/v061-mobile.patch
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
       - name: Create Android host
         shell: bash
         run: |
+          set -euo pipefail
           rm -rf build-mobile
           flutter create build-mobile --platforms android --project-name macropad_remote
           cp src/mobile/macropad_mobile/pubspec.yaml build-mobile/pubspec.yaml
@@ -48,15 +123,28 @@ jobs:
           p=Path('build-mobile/android/app/src/main/AndroidManifest.xml')
           s=p.read_text()
           marker='<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
-          permissions=[]
-          if 'android.permission.INTERNET' not in s:
-              permissions.append('    <uses-permission android:name="android.permission.INTERNET"/>')
-          if 'android.permission.CAMERA' not in s:
-              permissions.append('    <uses-permission android:name="android.permission.CAMERA"/>')
-          if permissions:
-              s=s.replace(marker, marker+'\n'+'\n'.join(permissions))
-          s=s.replace('<application','<application android:usesCleartextTraffic="true"',1)
+          perms=[
+              '    <uses-permission android:name="android.permission.INTERNET"/>',
+              '    <uses-permission android:name="android.permission.CAMERA"/>',
+              '    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>',
+              '    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>',
+              '    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>',
+              '    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation"/>',
+              '    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>',
+              '    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>',
+              '    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>',
+              '    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30"/>'
+          ]
+          missing=[x for x in perms if x.split('android:name="',1)[1].split('"',1)[0] not in s]
+          if missing:
+              s=s.replace(marker, marker+'\n'+'\n'.join(missing))
+          if 'android:usesCleartextTraffic=' not in s:
+              s=s.replace('<application','<application android:usesCleartextTraffic="true"',1)
           p.write_text(s)
+          gradle=Path('build-mobile/android/app/build.gradle.kts')
+          g=gradle.read_text()
+          g=g.replace('minSdk = flutter.minSdkVersion','minSdk = 24')
+          gradle.write_text(g)
           PY
       - name: Analyze and build APK
         shell: bash
@@ -69,6 +157,7 @@ jobs:
         with:
           name: MacroPadRemote-android
           path: build-mobile/build/app/outputs/flutter-apk/app-release.apk
+
   preview:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [windows, android]
@@ -89,7 +178,7 @@ jobs:
           ZIP=artifacts/windows/MacroPadRemote-win-x64.zip
           SHA=$(sha256sum "$ZIP" | awk '{print $1}')
           cat > preview.json <<JSON
-          {"version":"0.5.1-preview","channel":"preview","packageUrl":"https://github.com/${GH_REPO}/releases/download/preview/MacroPadRemote-win-x64.zip","sha256":"${SHA}","mandatory":false,"notes":"MacroPad Remote v0.5.1 UI feedback preview"}
+          {"version":"0.6.1-preview","channel":"preview","packageUrl":"https://github.com/${GH_REPO}/releases/download/preview/MacroPadRemote-win-x64.zip","sha256":"${SHA}","mandatory":false,"notes":"v0.6.1: reachable LAN route, phone/tablet detection, desktop mobile styling, orientation control"}
           JSON
       - name: Publish rolling preview
         env:
