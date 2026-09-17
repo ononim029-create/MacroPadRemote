@@ -25,8 +25,12 @@ const mpText = Color(0xfff2f2f2);
 const mpMuted = Color(0xff9da3a8);
 const mpBlue = Color(0xff1688ff);
 const mpGreen = Color(0xff62d16f);
+const _deviceChannel = MethodChannel('nexo/device');
 
-void main() => runApp(const MacroPadApp());
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const MacroPadApp());
+}
 
 enum ClientFormFactor { phone, tablet }
 enum TransportKind { wifi, bluetooth }
@@ -137,7 +141,61 @@ class MacroPadApp extends StatelessWidget {
         progressIndicatorTheme: const ProgressIndicatorThemeData(color: mpBlue),
         tooltipTheme: const TooltipThemeData(decoration: BoxDecoration(color: mpPanel2, border: Border.fromBorderSide(BorderSide(color: mpBorder))), textStyle: TextStyle(color: Colors.white)),
       ),
-      home: const ConnectPage(),
+      home: const NexoBootstrap(),
+    );
+  }
+}
+
+
+class NexoBootstrap extends StatefulWidget {
+  const NexoBootstrap({super.key});
+  @override
+  State<NexoBootstrap> createState() => _NexoBootstrapState();
+}
+
+class _NexoBootstrapState extends State<NexoBootstrap> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _fade;
+  late final Animation<double> _scale;
+  bool ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 720));
+    _fade = CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic);
+    _scale = Tween<double>(begin: .88, end: 1).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
+    _controller.forward();
+    Future<void>.delayed(const Duration(milliseconds: 780), () {
+      if (mounted) setState(() => ready = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (ready) return const ConnectPage();
+    return Scaffold(
+      body: Center(
+        child: FadeTransition(
+          opacity: _fade,
+          child: ScaleTransition(
+            scale: _scale,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const MacroPadMark(size: 72),
+              const SizedBox(height: 18),
+              const Text('NEXO', style: TextStyle(fontSize: 27, fontWeight: FontWeight.w700, letterSpacing: 3)),
+              const SizedBox(height: 22),
+              SizedBox(width: 110, child: LinearProgressIndicator(minHeight: 2, backgroundColor: mpPanel2, valueColor: const AlwaysStoppedAnimation(mpBlue))),
+            ]),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -838,6 +896,11 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
   bool scaleLocked = false;
   bool panLocked = false;
   bool bottomNavVisible = false;
+  bool tabletKeyboardVisible = true;
+  bool externalKeyboardConnected = false;
+  double tabletKeyboardHeight = 250;
+  final Set<String> _keyboardModifiers = <String>{};
+  Timer? _hardwareKeyboardTimer;
   Orientation? _lastOrientation;
   final TransformationController _deckTransform = TransformationController();
   late final AnimationController _deckReturnController;
@@ -850,7 +913,57 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
     serverName = widget.initialServerName;
     _deckReturnController = AnimationController(vsync: this, duration: const Duration(milliseconds: 260))
       ..addListener(() { if (_deckReturnAnimation != null) _deckTransform.value = _deckReturnAnimation!.value; });
+    if (widget.formFactor == ClientFormFactor.tablet) {
+      _deviceChannel.setMethodCallHandler((call) async {
+        if (call.method == 'hardwareKeyboardChanged') {
+          final connected = call.arguments == true;
+          if (mounted && connected != externalKeyboardConnected) {
+            setState(() { externalKeyboardConnected = connected; if (connected) tabletKeyboardVisible = false; });
+          }
+        }
+      });
+      _refreshHardwareKeyboard();
+      _hardwareKeyboardTimer = Timer.periodic(const Duration(seconds: 2), (_) => _refreshHardwareKeyboard());
+    }
     _connect();
+  }
+
+
+  Future<void> _refreshHardwareKeyboard() async {
+    if (widget.formFactor != ClientFormFactor.tablet) return;
+    try {
+      final connected = await _deviceChannel.invokeMethod<bool>('hasHardwareKeyboard') ?? false;
+      if (!mounted || connected == externalKeyboardConnected) return;
+      setState(() {
+        externalKeyboardConnected = connected;
+        if (connected) tabletKeyboardVisible = false;
+      });
+    } catch (_) {
+      final connected = HardwareKeyboard.instance.physicalKeysPressed.isNotEmpty;
+      if (mounted && connected != externalKeyboardConnected) {
+        setState(() {
+          externalKeyboardConnected = connected;
+          if (connected) tabletKeyboardVisible = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _virtualKey(String key, {bool modifier = false}) async {
+    if (modifier) {
+      setState(() {
+        if (_keyboardModifiers.contains(key)) { _keyboardModifiers.remove(key); } else { _keyboardModifiers.add(key); }
+      });
+      await HapticFeedback.selectionClick();
+      return;
+    }
+    final mods = <String>[];
+    for (final candidate in const ['CTRL', 'ALT', 'SHIFT']) {
+      if (_keyboardModifiers.contains(candidate)) mods.add(candidate);
+    }
+    final hotkey = [...mods, key].join('+');
+    await HapticFeedback.lightImpact();
+    await _sendHotkey(hotkey);
   }
 
   Future<void> _connect() async {
@@ -974,6 +1087,8 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
   @override
   void dispose() {
     subscription?.cancel();
+    _hardwareKeyboardTimer?.cancel();
+    if (widget.formFactor == ClientFormFactor.tablet) _deviceChannel.setMethodCallHandler(null);
     _deckReturnController.dispose();
     _deckTransform.dispose();
     widget.transport.close();
@@ -1006,6 +1121,7 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
 
 
   Widget _workspaceBody(List<Widget> pages, bool compact) {
+    if (widget.formFactor == ClientFormFactor.tablet) return _tabletWorkspace(pages);
     if (!compact) return pages[tab];
     return Stack(children: [
       Positioned.fill(child: pages[tab]),
@@ -1020,6 +1136,46 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
         child: InkWell(borderRadius: BorderRadius.circular(12), onTap: () => setState(() => bottomNavVisible = !bottomNavVisible),
           child: Padding(padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 3), child: Icon(bottomNavVisible ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up, size: 18))),
       ))),
+    ]);
+  }
+
+
+  Widget _tabletWorkspace(List<Widget> pages) {
+    final showKeyboardCapability = !externalKeyboardConnected && tab == 0;
+    return Column(children: [
+      Expanded(child: pages[tab]),
+      if (showKeyboardCapability && tabletKeyboardVisible)
+        SizedBox(
+          height: tabletKeyboardHeight,
+          child: Column(children: [
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onVerticalDragUpdate: (details) => setState(() => tabletKeyboardHeight = (tabletKeyboardHeight - details.delta.dy).clamp(150.0, 430.0)),
+              child: Container(
+                height: 18,
+                color: const Color(0xaa24272a),
+                alignment: Alignment.center,
+                child: const Icon(Icons.drag_handle, size: 17, color: Color(0xffb8bdc2)),
+              ),
+            ),
+            Expanded(child: _TabletRemoteKeyboard(onKey: _virtualKey, activeModifiers: _keyboardModifiers)),
+          ]),
+        ),
+      if (showKeyboardCapability)
+        Center(
+          child: Material(
+            color: const Color(0x9924272a),
+            borderRadius: BorderRadius.circular(12),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => setState(() => tabletKeyboardVisible = !tabletKeyboardVisible),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 2),
+                child: Icon(tabletKeyboardVisible ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up, size: 20, color: const Color(0xffc5c9cc)),
+              ),
+            ),
+          ),
+        ),
     ]);
   }
 
@@ -1293,6 +1449,58 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: BorderSide(color: mpBorder)),
         child: InkWell(onTap: () => _sendHotkey(hotkey), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(icon, color: Colors.white, size: 30), const SizedBox(height: 7), Text(label, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white))])),
       );
+}
+
+
+class _TabletRemoteKeyboard extends StatelessWidget {
+  final Future<void> Function(String key, {bool modifier}) onKey;
+  final Set<String> activeModifiers;
+  const _TabletRemoteKeyboard({required this.onKey, required this.activeModifiers});
+
+  static const _rows = <List<String>>[
+    ['ESC','1','2','3','4','5','6','7','8','9','0','BACKSPACE'],
+    ['TAB','Q','W','E','R','T','Y','U','I','O','P','ENTER'],
+    ['SHIFT','A','S','D','F','G','H','J','K','L','UP','DELETE'],
+    ['CTRL','ALT','Z','X','C','V','B','N','M','LEFT','DOWN','RIGHT'],
+  ];
+
+  @override
+  Widget build(BuildContext context) => Container(
+        color: const Color(0xff111315),
+        padding: const EdgeInsets.fromLTRB(8, 5, 8, 6),
+        child: Column(children: [
+          for (final row in _rows)
+            Expanded(child: Row(children: [for (final key in row) Expanded(flex: _flex(key), child: _key(key))])),
+          Expanded(child: Row(children: [
+            Expanded(flex: 2, child: _key('CTRL')),
+            Expanded(flex: 2, child: _key('ALT')),
+            Expanded(flex: 8, child: _key('SPACE', label: 'ПРОБЕЛ')),
+            Expanded(flex: 2, child: _key('SHIFT')),
+          ])),
+        ]),
+      );
+
+  int _flex(String key) => switch (key) { 'BACKSPACE' || 'ENTER' || 'SHIFT' || 'CTRL' || 'ALT' || 'TAB' => 2, _ => 1 };
+
+  Widget _key(String key, {String? label}) {
+    final modifier = key == 'CTRL' || key == 'ALT' || key == 'SHIFT';
+    final active = activeModifiers.contains(key);
+    return Padding(
+      padding: const EdgeInsets.all(2.5),
+      child: Material(
+        color: active ? const Color(0xff264e73) : mpPanel2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6), side: BorderSide(color: active ? mpBlue : mpBorder)),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: () => onKey(key, modifier: modifier),
+          child: Center(child: Text(label ?? _label(key), maxLines: 1, overflow: TextOverflow.fade, style: TextStyle(fontSize: _fontSize(key), color: Colors.white, fontWeight: active ? FontWeight.w700 : FontWeight.w500))),
+        ),
+      ),
+    );
+  }
+
+  double _fontSize(String key) => key.length > 5 ? 9.0 : 12.0;
+  String _label(String key) => switch (key) { 'BACKSPACE' => '⌫', 'ENTER' => '↵', 'SHIFT' => '⇧', 'CTRL' => 'Ctrl', 'ALT' => 'Alt', 'TAB' => 'Tab', 'DELETE' => 'Del', 'LEFT' => '←', 'RIGHT' => '→', 'UP' => '↑', 'DOWN' => '↓', 'ESC' => 'Esc', _ => key };
 }
 
 class _SharpNavItem {

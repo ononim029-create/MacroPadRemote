@@ -16,6 +16,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Microsoft.AspNetCore.Builder;
@@ -90,6 +91,7 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        BeginStartupAnimation();
         UpdateZoom();
         try
         {
@@ -99,6 +101,22 @@ public partial class MainWindow : Window
         {
             DeviceStatus.Text = $"Ошибка связи: {ex.Message}";
         }
+        await Task.Delay(420);
+        HideStartupOverlay();
+    }
+
+    private void BeginStartupAnimation()
+    {
+        var scale = new DoubleAnimation(.86, 1.0, TimeSpan.FromMilliseconds(620)) { EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = .18 } };
+        StartupMarkScale.BeginAnimation(ScaleTransform.ScaleXProperty, scale);
+        StartupMarkScale.BeginAnimation(ScaleTransform.ScaleYProperty, scale);
+    }
+
+    private void HideStartupOverlay()
+    {
+        var fade = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(260)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
+        fade.Completed += (_, _) => StartupOverlay.Visibility = Visibility.Collapsed;
+        StartupOverlay.BeginAnimation(OpacityProperty, fade);
     }
 
     private void LoadState()

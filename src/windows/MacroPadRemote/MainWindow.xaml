@@ -21,9 +21,16 @@
             <Grid Margin="16,0,14,0">
                 <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="▦" FontSize="23" FontWeight="Bold" Margin="0,0,10,0"/>
+                    <Grid Width="24" Height="24" Margin="0,0,10,0">
+                        <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                        <Rectangle Fill="#1688FF" Margin="0,0,2,2"/>
+                        <Rectangle Grid.Column="1" Fill="#F2F2F2" Margin="2,0,0,2"/>
+                        <Rectangle Grid.Row="1" Fill="#F2F2F2" Margin="0,2,2,0"/>
+                        <Rectangle Grid.Row="1" Grid.Column="1" Fill="#24272A" Stroke="#F2F2F2" StrokeThickness="1" Margin="2,2,0,0"/>
+                    </Grid>
                     <TextBlock Text="NEXO" FontSize="18" FontWeight="SemiBold"/>
-                    <TextBlock Text="  v1.0 preview" FontSize="11" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                    <TextBlock Text="  v1.1 preview" FontSize="11" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                     <Border Background="#202326" BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="10,5" Margin="0,0,8,0">
@@ -177,5 +184,22 @@
                 </StackPanel>
             </Border>
         </primitives:Popup>
+        <Border x:Name="StartupOverlay" Grid.RowSpan="3" Grid.ColumnSpan="3" Panel.ZIndex="999" Background="#17191B" Opacity="1">
+            <Grid>
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Grid Width="76" Height="76" HorizontalAlignment="Center" RenderTransformOrigin="0.5,0.5">
+                        <Grid.RenderTransform><ScaleTransform x:Name="StartupMarkScale" ScaleX="0.86" ScaleY="0.86"/></Grid.RenderTransform>
+                        <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                        <Rectangle Fill="#1688FF" Margin="0,0,5,5"/>
+                        <Rectangle Grid.Column="1" Fill="#F2F2F2" Margin="5,0,0,5"/>
+                        <Rectangle Grid.Row="1" Fill="#F2F2F2" Margin="0,5,5,0"/>
+                        <Rectangle Grid.Row="1" Grid.Column="1" Fill="#24272A" Stroke="#F2F2F2" StrokeThickness="2" Margin="5,5,0,0"/>
+                    </Grid>
+                    <TextBlock Text="NEXO" HorizontalAlignment="Center" Margin="0,18,0,0" FontSize="25" FontWeight="Bold" CharacterSpacing="220"/>
+                    <ProgressBar Width="120" Height="2" IsIndeterminate="True" Margin="0,22,0,0" Foreground="#1688FF" Background="#24272A"/>
+                </StackPanel>
+            </Grid>
+        </Border>
     </Grid>
 </Window>

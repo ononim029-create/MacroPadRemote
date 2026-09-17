@@ -8,8 +8,8 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyName>NEXO</AssemblyName>
     <Product>NEXO</Product>
-    <Version>1.0.0</Version>
-    <InformationalVersion>1.0.0-preview</InformationalVersion>
+    <Version>1.1.0</Version>
+    <InformationalVersion>1.1.0-preview</InformationalVersion>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
