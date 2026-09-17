@@ -1,13 +1,19 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -20,145 +26,1705 @@ namespace MacroPadRemote;
 
 public partial class MainWindow : Window
 {
-    readonly string statePath;
-    readonly ObservableCollection<Profile> profiles = new();
-    readonly List<WebSocket> clients = new();
-    readonly JsonSerializerOptions json = new() { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-    AppState state = new(); Profile? profile; DeckPage? page; Tile? selected; Button? selectedButton;
-    WebApplication? server; string pairCode = ""; bool updating; double fitScale = 1, userZoom = 1;
+    private const int WebSocketPort = 8765;
+    private readonly string _statePath;
+    private readonly ObservableCollection<Profile> _profiles = new();
+    private readonly List<WebSocket> _clients = new();
+    private readonly Dictionary<WebSocket, string> _clientIds = new();
+    private readonly JsonSerializerOptions _json = new() { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private readonly ObservableCollection<ActionItem> _actions = new();
+    private readonly LanDiscoveryService _lanDiscovery;
+    private readonly BleGattServer _ble = new();
+
+    private AppState _state = new();
+    private Profile? _profile;
+    private DeckPage? _page;
+    private Tile? _selected;
+    private Button? _selectedButton;
+    private WebApplication? _server;
+    private string _pairToken = "";
+    private bool _updating;
+    private bool _capturingHotkey;
+    private bool _bleAuthenticated;
+    private string _bleClientId = "";
+    private double _fitScale = 1;
+    private double _userZoom = 1;
+    private Point _actionDragStart;
 
     public MainWindow()
     {
         InitializeComponent();
+
         var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MacroPadRemote");
-        Directory.CreateDirectory(dir); statePath = Path.Combine(dir, "presets.json");
-        LoadState(); ProfileBox.ItemsSource = profiles; ActionsList.ItemsSource = Actions();
-        ApplyTransport(); RefreshProfiles();
-        Loaded += (_, _) => Dispatcher.BeginInvoke(UpdateZoom, DispatcherPriority.Loaded);
-    }
+        Directory.CreateDirectory(dir);
+        _statePath = Path.Combine(dir, "presets.json");
 
-    void LoadState()
-    {
-        try { if (File.Exists(statePath)) state = JsonSerializer.Deserialize<AppState>(File.ReadAllText(statePath), json) ?? new(); } catch { state = new(); }
-        if (state.Profiles.Count == 0)
+        LoadState();
+        ProfileBox.ItemsSource = _profiles;
+        RefreshTrustedDevices();
+
+        foreach (var action in BuildActionLibrary())
+            _actions.Add(action);
+        ConfigureActionView();
+
+        _lanDiscovery = new LanDiscoveryService(WebSocketPort, LocalIp, () => _state.ServerId);
+        _lanDiscovery.PeerSeen += endpoint => Dispatcher.InvokeAsync(() =>
         {
-            state.Profiles.Add(DefaultProfile("Revit", "R"));
-            state.Profiles.Add(DefaultProfile("NanoCAD", "N"));
-            state.Profiles.Add(DefaultProfile("Рабочий стол", "▣"));
-            state.ActiveProfileId = state.Profiles[0].Id;
+            DeviceStatus.Text = $"Телефон найден в сети: {endpoint.Address}";
+        });
+
+        _ble.MessageReceived += HandleBleMessageAsync;
+        _ble.StatusChanged += status => Dispatcher.InvokeAsync(() =>
+        {
+            if (SelectedTransport() == "Bluetooth")
+                DeviceStatus.Text = $"Bluetooth LE: {status}";
+        });
+
+        ApplyTransport();
+        RefreshProfiles();
+        Loaded += MainWindow_Loaded;
+    }
+
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        UpdateZoom();
+        try
+        {
+            await StartSelectedTransportAsync();
         }
-        foreach (var p in state.Profiles) { if (p.Pages.Count == 0) p.Pages.Add(DefaultPage("Страница 1")); if (string.IsNullOrWhiteSpace(p.ActivePageId)) p.ActivePageId = p.Pages[0].Id; foreach (var pg in p.Pages) EnsureCapacity(pg); profiles.Add(p); }
-    }
-    void SaveState() { state.Profiles = profiles.ToList(); if (profile != null) state.ActiveProfileId = profile.Id; try { File.WriteAllText(statePath, JsonSerializer.Serialize(state, json)); } catch { } }
-    static Profile DefaultProfile(string name, string icon) { var p = new Profile { Name = name, Icon = icon }; var pg = DefaultPage("Страница 1"); p.Pages.Add(pg); p.ActivePageId = pg.Id; return p; }
-    static DeckPage DefaultPage(string name)
-    {
-        var pg = new DeckPage { Name = name, Rows = 3, Columns = 4 };
-        string[] n = ["Сохранить","Скриншот","Переключить окна","Браузер","Назад","Воспроизведение","Выключить звук","Рабочий стол","Почта","Калькулятор","Открыть папку","Добавить"];
-        string[] h = ["CTRL+S","WIN+SHIFT+S","ALT+TAB","CTRL+L","ESC","MEDIA_PLAY","VOLUME_MUTE","WIN+D","","","",""];
-        for (int i=0;i<n.Length;i++) pg.Tiles.Add(new Tile { Title=n[i], Hotkey=h[i] }); return pg;
+        catch (Exception ex)
+        {
+            DeviceStatus.Text = $"Ошибка связи: {ex.Message}";
+        }
     }
 
-    void RefreshProfiles()
+    private void LoadState()
     {
-        updating=true; ProfileBox.ItemsSource=null; ProfileBox.ItemsSource=profiles;
-        profile = profiles.FirstOrDefault(x=>x.Id==state.ActiveProfileId) ?? profiles.First(); ProfileBox.SelectedItem=profile; updating=false; LoadProfile();
-    }
-    void LoadProfile()
-    {
-        if (profile==null) return; if (profile.Pages.Count==0) profile.Pages.Add(DefaultPage("Страница 1"));
-        page=profile.Pages.FirstOrDefault(x=>x.Id==profile.ActivePageId) ?? profile.Pages[0]; profile.ActivePageId=page.Id;
-        updating=true; ProfileTitle.Text=profile.Name; ProfileName.Text=profile.Name; ProfileDescription.Text=profile.Description; ColumnsBox.Text=page.Columns.ToString(); RowsBox.Text=page.Rows.ToString(); userZoom=Math.Clamp(page.Zoom,ZoomSlider.Minimum,ZoomSlider.Maximum); ZoomSlider.Value=userZoom;
-        PageBox.ItemsSource=null; PageBox.ItemsSource=profile.Pages; PageBox.SelectedItem=page; updating=false; RebuildPages(); RebuildGrid();
-    }
-    void RebuildPages()
-    {
-        if (profile==null||page==null) return; PageButtons.Children.Clear(); int idx=profile.Pages.IndexOf(page)+1; PageInfo.Text=$"Страница {idx} из {profile.Pages.Count}";
-        for(int i=0;i<profile.Pages.Count;i++){var pg=profile.Pages[i]; var b=new Button{Content=(i+1).ToString(),Width=34,Height=32,Margin=new Thickness(3,0,3,0),Tag=pg,Background=pg.Id==page.Id?Brushes.White:(Brush)FindResource("Panel2"),Foreground=pg.Id==page.Id?Brushes.Black:Brushes.White}; b.Click+=(_,_)=>{profile.ActivePageId=pg.Id;SaveState();LoadProfile();_=Broadcast();};PageButtons.Children.Add(b);}
-    }
-    void RebuildGrid()
-    {
-        if(page==null)return; EnsureCapacity(page); DeckGrid.Children.Clear();DeckGrid.RowDefinitions.Clear();DeckGrid.ColumnDefinitions.Clear();
-        for(int r=0;r<page.Rows;r++)DeckGrid.RowDefinitions.Add(new RowDefinition{Height=new GridLength(116)}); for(int c=0;c<page.Columns;c++)DeckGrid.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(142)});
-        GridInfo.Text=$"{page.Columns} × {page.Rows}  •  {page.Columns*page.Rows} ячеек"; bool[,] used=new bool[page.Rows,page.Columns]; int no=1;
-        foreach(var t in page.Tiles){var pos=FindSpace(used,t,page.Rows,page.Columns);if(pos==null)continue;var(r,c)=pos.Value;int rs=Math.Min(Math.Max(1,t.RowSpan),page.Rows-r),cs=Math.Min(Math.Max(1,t.ColumnSpan),page.Columns-c);Mark(used,r,c,rs,cs);var b=TileButton(t,no++);Grid.SetRow(b,r);Grid.SetColumn(b,c);Grid.SetRowSpan(b,rs);Grid.SetColumnSpan(b,cs);DeckGrid.Children.Add(b);} Dispatcher.BeginInvoke(UpdateZoom,DispatcherPriority.Background);
-    }
-    Button TileButton(Tile t,int no)
-    {
-        bool blank=IsBlank(t); var b=new Button{Tag=t,Margin=new Thickness(5),Padding=new Thickness(10),MinWidth=125,MinHeight=100,Background=new SolidColorBrush(blank?Color.FromRgb(32,35,38):Color.FromRgb(39,43,46)),BorderBrush=new SolidColorBrush(Color.FromRgb(20,22,24)),BorderThickness=new Thickness(2)};
-        var root=new Grid();var sp=new StackPanel{HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};sp.Children.Add(new TextBlock{Text=Glyph(t),FontSize=26,HorizontalAlignment=HorizontalAlignment.Center,Margin=new Thickness(0,0,0,7),Foreground=blank?Brushes.Gray:Brushes.White});sp.Children.Add(new TextBlock{Text=t.Title,TextAlignment=TextAlignment.Center,TextWrapping=TextWrapping.Wrap,FontWeight=FontWeights.SemiBold,Foreground=blank?Brushes.Gray:Brushes.White,MaxWidth=180});if(!string.IsNullOrWhiteSpace(t.Hotkey))sp.Children.Add(new TextBlock{Text=t.Hotkey,FontSize=9,Foreground=(Brush)FindResource("Muted"),HorizontalAlignment=HorizontalAlignment.Center,Margin=new Thickness(0,4,0,0)});root.Children.Add(sp);if(ShowNumbers.IsChecked==true)root.Children.Add(new TextBlock{Text=no.ToString(),FontSize=10,Foreground=Brushes.Gray,HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Top});b.Content=root;
-        b.Click+=(_,_)=>SelectTile(b,t); b.MouseDoubleClick+=(_,_)=>FocusTile(b); b.ContextMenu=TileMenu(t); return b;
-    }
-    void SelectTile(Button b,Tile t){if(selectedButton!=null)selectedButton.BorderBrush=new SolidColorBrush(Color.FromRgb(20,22,24));selectedButton=b;selected=t;b.BorderBrush=(Brush)FindResource("Blue");}
-    ContextMenu TileMenu(Tile t)
-    {
-        var m=new ContextMenu();var edit=new MenuItem{Header="Редактировать макрос…"};edit.Click+=(_,_)=>EditTile(t);m.Items.Add(edit);m.Items.Add(new Separator());var size=new MenuItem{Header="Размер ячейки"};foreach(var o in new[]{("1 × 1",1,1),("2 × 1",2,1),("1 × 2",1,2),("2 × 2",2,2),("3 × 1",3,1),("1 × 3",1,3)}){int c=o.Item2,r=o.Item3;var i=new MenuItem{Header=o.Item1,IsCheckable=true,IsChecked=t.ColumnSpan==c&&t.RowSpan==r};i.Click+=(_,_)=>ResizeTile(t,c,r);size.Items.Add(i);}m.Items.Add(size);var clear=new MenuItem{Header="Очистить ячейку"};clear.Click+=(_,_)=>{t.Title="Добавить";t.Hotkey="";t.ColumnSpan=t.RowSpan=1;EnsureCapacity(page!);SaveAndBroadcast();};m.Items.Add(clear);return m;
-    }
-    void EditTile(Tile t)
-    {
-        var w=new Window{Owner=this,Title="Макрос",Width=430,Height=260,ResizeMode=ResizeMode.NoResize,WindowStartupLocation=WindowStartupLocation.CenterOwner,Background=(Brush)FindResource("Bg")};var g=new Grid{Margin=new Thickness(18)};for(int i=0;i<5;i++)g.RowDefinitions.Add(new RowDefinition{Height=i is 1 or 3?new GridLength(38):GridLength.Auto});var title=new TextBox{Text=t.Title};var key=new TextBox{Text=t.Hotkey};g.Children.Add(new TextBlock{Text="Название"});Grid.SetRow(title,1);g.Children.Add(title);var l=new TextBlock{Text="Команда / горячая клавиша",Margin=new Thickness(0,8,0,3)};Grid.SetRow(l,2);g.Children.Add(l);Grid.SetRow(key,3);g.Children.Add(key);var buttons=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,Margin=new Thickness(0,12,0,0)};var cancel=new Button{Content="Отмена",Width=90,Margin=new Thickness(0,0,8,0)};cancel.Click+=(_,_)=>w.Close();var ok=new Button{Content="Сохранить",Width=100};ok.Click+=(_,_)=>{t.Title=string.IsNullOrWhiteSpace(title.Text)?"Кнопка":title.Text.Trim();t.Hotkey=key.Text.Trim().ToUpperInvariant();w.DialogResult=true;};buttons.Children.Add(cancel);buttons.Children.Add(ok);Grid.SetRow(buttons,4);g.Children.Add(buttons);w.Content=g;if(w.ShowDialog()==true)SaveAndBroadcast();
-    }
-    void ResizeTile(Tile t,int cols,int rows)
-    {
-        if(page==null)return;cols=Math.Clamp(cols,1,page.Columns);rows=Math.Clamp(rows,1,page.Rows);int extra=cols*rows-Math.Max(1,t.ColumnSpan)*Math.Max(1,t.RowSpan);if(extra>0){var blanks=page.Tiles.Where(x=>!ReferenceEquals(x,t)&&IsBlank(x)).Take(extra).ToList();if(blanks.Count<extra){MessageBox.Show(this,"Недостаточно свободных пустых ячеек.","MacroPad Remote");return;}foreach(var x in blanks)page.Tiles.Remove(x);}t.ColumnSpan=cols;t.RowSpan=rows;EnsureCapacity(page);SaveAndBroadcast();
-    }
-    static (int,int)? FindSpace(bool[,] u,Tile t,int rows,int cols){int rs=Math.Max(1,t.RowSpan),cs=Math.Max(1,t.ColumnSpan);for(int r=0;r<rows;r++)for(int c=0;c<cols;c++){if(r+rs>rows||c+cs>cols)continue;bool ok=true;for(int y=0;y<rs&&ok;y++)for(int x=0;x<cs;x++)if(u[r+y,c+x]){ok=false;break;}if(ok)return(r,c);}return null;}
-    static void Mark(bool[,]u,int r,int c,int rs,int cs){for(int y=0;y<rs;y++)for(int x=0;x<cs;x++)u[r+y,c+x]=true;}
-    static bool IsBlank(Tile t)=>string.IsNullOrWhiteSpace(t.Hotkey)&&t.Title.Equals("Добавить",StringComparison.OrdinalIgnoreCase);
-    static int UsedArea(DeckPage p)=>p.Tiles.Sum(t=>Math.Max(1,t.RowSpan)*Math.Max(1,t.ColumnSpan));
-    static int ConfiguredArea(DeckPage p)=>p.Tiles.Where(t=>!IsBlank(t)).Sum(t=>Math.Max(1,t.RowSpan)*Math.Max(1,t.ColumnSpan));
-    static void EnsureCapacity(DeckPage p){p.Rows=Math.Clamp(p.Rows,1,12);p.Columns=Math.Clamp(p.Columns,1,12);int target=p.Rows*p.Columns;while(UsedArea(p)<target)p.Tiles.Add(new Tile());while(UsedArea(p)>target){var b=p.Tiles.LastOrDefault(IsBlank);if(b==null)break;p.Tiles.Remove(b);}}
-    static string Glyph(Tile t){var s=t.Title.ToLowerInvariant();if(s.Contains("сохран"))return"▣";if(s.Contains("скрин"))return"⌗";if(s.Contains("брауз"))return"◎";if(s.Contains("пап"))return"□";if(s.Contains("звук"))return"◖";if(s.Contains("восп"))return"▶";if(s.Contains("назад"))return"←";return IsBlank(t)?"+":"⌨";}
+        try
+        {
+            if (File.Exists(_statePath))
+                _state = JsonSerializer.Deserialize<AppState>(File.ReadAllText(_statePath), _json) ?? new AppState();
+        }
+        catch
+        {
+            _state = new AppState();
+        }
 
-    void UpdateZoom(){if(page==null||!IsLoaded)return;DeckGrid.Measure(new Size(double.PositiveInfinity,double.PositiveInfinity));var d=DeckGrid.DesiredSize;if(d.Width<=0||d.Height<=0)return;double w=Math.Max(1,DeckViewport.ViewportWidth-48),h=Math.Max(1,DeckViewport.ViewportHeight-48);fitScale=Math.Clamp(Math.Min(w/d.Width,h/d.Height),.28,1);DeckScaleHost.LayoutTransform=new ScaleTransform(fitScale*userZoom,fitScale*userZoom);}
-    void DeckViewport_SizeChanged(object s,SizeChangedEventArgs e)=>UpdateZoom();
-    void ZoomSlider_ValueChanged(object s,RoutedPropertyChangedEventArgs<double> e){if(updating||page==null||!IsLoaded)return;userZoom=ZoomSlider.Value;page.Zoom=userZoom;SaveState();UpdateZoom();}
-    void DeckViewport_PreviewMouseWheel(object s,MouseWheelEventArgs e){if((Keyboard.Modifiers&ModifierKeys.Control)==0)return;e.Handled=true;var p=e.GetPosition(DeckViewport);double old=Math.Max(.01,fitScale*userZoom),lx=(DeckViewport.HorizontalOffset+p.X)/old,ly=(DeckViewport.VerticalOffset+p.Y)/old;userZoom=Math.Clamp(userZoom+(e.Delta>0?.12:-.12),ZoomSlider.Minimum,ZoomSlider.Maximum);updating=true;ZoomSlider.Value=userZoom;updating=false;if(page!=null)page.Zoom=userZoom;SaveState();UpdateZoom();Dispatcher.BeginInvoke(()=>{double n=fitScale*userZoom;DeckViewport.ScrollToHorizontalOffset(Math.Max(0,lx*n-p.X));DeckViewport.ScrollToVerticalOffset(Math.Max(0,ly*n-p.Y));},DispatcherPriority.Background);}
-    void FocusTile(FrameworkElement el){userZoom=Math.Max(userZoom,1.5);updating=true;ZoomSlider.Value=userZoom;updating=false;if(page!=null)page.Zoom=userZoom;UpdateZoom();Dispatcher.BeginInvoke(()=>{try{var b=el.TransformToAncestor(DeckGrid).TransformBounds(new Rect(new Point(),el.RenderSize));double s=fitScale*userZoom;DeckViewport.ScrollToHorizontalOffset(Math.Max(0,(b.Left+b.Width/2)*s-DeckViewport.ViewportWidth/2));DeckViewport.ScrollToVerticalOffset(Math.Max(0,(b.Top+b.Height/2)*s-DeckViewport.ViewportHeight/2));}catch{}},DispatcherPriority.Background);}
+        _state.Profiles ??= new List<Profile>();
+        _state.TrustedDevices ??= new List<TrustedClient>();
+        if (string.IsNullOrWhiteSpace(_state.ServerId))
+            _state.ServerId = Guid.NewGuid().ToString("N");
+        foreach (var device in _state.TrustedDevices)
+            device.IsOnline = false;
 
-    void ProfileBox_SelectionChanged(object s,SelectionChangedEventArgs e){if(updating||ProfileBox.SelectedItem is not Profile p)return;profile=p;state.ActiveProfileId=p.Id;SaveState();LoadProfile();_=Broadcast();}
-    void PageBox_SelectionChanged(object s,SelectionChangedEventArgs e){if(updating||profile==null||PageBox.SelectedItem is not DeckPage p)return;profile.ActivePageId=p.Id;SaveState();LoadProfile();_=Broadcast();}
-    void AddProfile_Click(object s,RoutedEventArgs e){var n=Prompt("Новый профиль",$"Профиль {profiles.Count+1}");if(n==null)return;var p=DefaultProfile(n,n[..1].ToUpperInvariant());profiles.Add(p);state.ActiveProfileId=p.Id;SaveState();RefreshProfiles();}
-    void DeleteProfile_Click(object s,RoutedEventArgs e){if(profile==null||profiles.Count<=1)return;if(MessageBox.Show(this,$"Удалить профиль «{profile.Name}»?","MacroPad Remote",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;profiles.Remove(profile);state.ActiveProfileId=profiles[0].Id;SaveState();RefreshProfiles();_=Broadcast();}
-    void ProfileMenu_Click(object s,RoutedEventArgs e){if(s is not Button{Tag:Profile p} b)return;ProfileBox.SelectedItem=p;var m=new ContextMenu();var ren=new MenuItem{Header="Переименовать"};ren.Click+=(_,_)=>{var n=Prompt("Переименовать профиль",p.Name);if(n==null)return;p.Name=n;SaveState();RefreshProfiles();};var copy=new MenuItem{Header="Создать копию"};copy.Click+=(_,_)=>{var x=JsonSerializer.Deserialize<Profile>(JsonSerializer.Serialize(p,json),json)!;x.Id=Guid.NewGuid().ToString("N");x.Name+=" copy";foreach(var pg in x.Pages){pg.Id=Guid.NewGuid().ToString("N");foreach(var t in pg.Tiles)t.Id=Guid.NewGuid().ToString("N");}x.ActivePageId=x.Pages[0].Id;profiles.Add(x);state.ActiveProfileId=x.Id;SaveState();RefreshProfiles();};var del=new MenuItem{Header="Удалить"};del.Click+=DeleteProfile_Click;m.Items.Add(ren);m.Items.Add(copy);m.Items.Add(new Separator());m.Items.Add(del);b.ContextMenu=m;m.PlacementTarget=b;m.IsOpen=true;e.Handled=true;}
-    void AddPage_Click(object s,RoutedEventArgs e){if(profile==null)return;var n=Prompt("Новая страница",$"Страница {profile.Pages.Count+1}");if(n==null)return;var pg=DefaultPage(n);profile.Pages.Add(pg);profile.ActivePageId=pg.Id;SaveState();LoadProfile();_=Broadcast();}
-    void SaveProfile_Click(object s,RoutedEventArgs e){if(profile==null||page==null)return;if(!string.IsNullOrWhiteSpace(ProfileName.Text))profile.Name=ProfileName.Text.Trim();profile.Description=ProfileDescription.Text.Trim();int cols=int.TryParse(ColumnsBox.Text,out var c)?Math.Clamp(c,1,12):page.Columns,rows=int.TryParse(RowsBox.Text,out var r)?Math.Clamp(r,1,12):page.Rows;if(ConfiguredArea(page)>cols*rows){MessageBox.Show(this,"Новая сетка слишком мала для уже настроенных плиток.","MacroPad Remote");return;}page.Columns=cols;page.Rows=rows;EnsureCapacity(page);SaveState();RefreshProfiles();_=Broadcast();}
-    void ActionsList_DoubleClick(object s,MouseButtonEventArgs e){if(selected==null||ActionsList.SelectedItem is not ActionItem a)return;selected.Title=a.Title;selected.Hotkey=a.Hotkey;SaveAndBroadcast();}
-    static List<ActionItem> Actions()=>[new("Сохранить","CTRL+S"),new("Скриншот","WIN+SHIFT+S"),new("Переключить окна","ALT+TAB"),new("Рабочий стол","WIN+D"),new("Копировать","CTRL+C"),new("Вставить","CTRL+V"),new("Отменить","CTRL+Z"),new("Воспроизведение","MEDIA_PLAY"),new("Выключить звук","VOLUME_MUTE")];
+        if (_state.Profiles.Count == 0)
+        {
+            _state.Profiles.Add(DefaultProfile("Revit", "R"));
+            _state.Profiles.Add(DefaultProfile("NanoCAD", "N"));
+            _state.Profiles.Add(DefaultProfile("Рабочий стол", "▣"));
+            _state.ActiveProfileId = _state.Profiles[0].Id;
+        }
 
-    string SelectedTransport()=>TransportBox.SelectedItem is ComboBoxItem i&&Equals(i.Tag?.ToString(),"Bluetooth")?"Bluetooth":"Wifi";
-    void ApplyTransport(){updating=true;string wanted=state.Transport=="Bluetooth"?"Bluetooth":"Wifi";foreach(var i in TransportBox.Items.OfType<ComboBoxItem>())if(i.Tag?.ToString()==wanted){TransportBox.SelectedItem=i;break;}updating=false;SyncConnectionUi();}
-    async void TransportBox_SelectionChanged(object s,SelectionChangedEventArgs e){if(updating)return;if(server!=null)await StopServer();state.Transport=SelectedTransport();SaveState();SyncConnectionUi();}
-    void SyncConnectionUi(){bool wifi=SelectedTransport()=="Wifi";DeviceQrButton.IsEnabled=HeaderQrButton.IsEnabled=wifi;string text=server!=null?"Остановить связь":wifi?"Запустить связь":"Bluetooth — скоро";DeviceServerButton.Content=HeaderServerButton.Content=text;if(server==null){DeviceStatus.Text=wifi?"Связь не запущена":"Bluetooth выбран";ConnectionDetails.Text=wifi?"Wi‑Fi: запуск сервера + QR-код":"BLE-транспорт будет следующим этапом";}}
-    async void ServerButton_Click(object s,RoutedEventArgs e){if(SelectedTransport()=="Bluetooth"){MessageBox.Show(this,"Bluetooth уже добавлен как режим подключения. В этой preview-сборке реальный BLE-транспорт ещё не активирован; используйте Wi‑Fi + QR-код.","MacroPad Remote");return;}try{if(server==null)await StartServer();else await StopServer();}catch(Exception ex){MessageBox.Show(this,$"Не удалось изменить состояние связи.\n\n{ex.Message}","MacroPad Remote");}}
-    async Task StartServer()
-    {
-        pairCode=Random.Shared.Next(100000,999999).ToString();var b=WebApplication.CreateBuilder();b.WebHost.UseUrls("http://0.0.0.0:8765");var app=b.Build();app.UseWebSockets();app.Map("/ws",async ctx=>{if(!ctx.WebSockets.IsWebSocketRequest||ctx.Request.Query["token"]!=pairCode){ctx.Response.StatusCode=401;return;}var ws=await ctx.WebSockets.AcceptWebSocketAsync();lock(clients)clients.Add(ws);Dispatcher.Invoke(UpdateConnectionStatus);await SendConfig(ws);var buf=new byte[8192];try{while(ws.State==WebSocketState.Open){var r=await ws.ReceiveAsync(buf,CancellationToken.None);if(r.MessageType==WebSocketMessageType.Close)break;using var doc=JsonDocument.Parse(Encoding.UTF8.GetString(buf,0,r.Count));if(doc.RootElement.TryGetProperty("hotkey",out var h))Dispatcher.Invoke(()=>ExecuteHotkey(h.GetString()??""));}}catch{}finally{lock(clients)clients.Remove(ws);Dispatcher.Invoke(UpdateConnectionStatus);}});await app.StartAsync();server=app;DeviceStatus.Text="Wi‑Fi активен";ConnectionDetails.Text=$"{LocalIp()}:8765  •  код {pairCode}";SyncConnectionUi();UpdateConnectionStatus();
-    }
-    async Task StopServer(){if(server==null)return;await server.StopAsync();await server.DisposeAsync();server=null;lock(clients)clients.Clear();SyncConnectionUi();UpdateConnectionStatus();}
-    void UpdateConnectionStatus(){int count;lock(clients)count=clients.Count;HeaderStatus.Text=count==0?(server==null?"Нет подключенных телефонов":"Сервер запущен"):count==1?"Подключен 1 телефон":$"Подключено: {count}";HeaderDot.Foreground=count>0?(Brush)FindResource("Green"):server!=null?Brushes.Gold:(Brush)FindResource("Muted");}
-    void ShowQr_Click(object s,RoutedEventArgs e){if(SelectedTransport()!="Wifi"){MessageBox.Show(this,"QR-код используется для Wi‑Fi подключения.","MacroPad Remote");return;}if(server==null){MessageBox.Show(this,"Сначала запустите связь по Wi‑Fi.","MacroPad Remote");return;}ShowQr(LocalIp(),8765,pairCode);}
-    void ShowQr(string host,int port,string token)
-    {
-        string payload=$"macropad://connect?host={Uri.EscapeDataString(host)}&port={port}&token={Uri.EscapeDataString(token)}";using var gen=new QRCodeGenerator();using var data=gen.CreateQrCode(payload,QRCodeGenerator.ECCLevel.Q);byte[] png=new PngByteQRCode(data).GetGraphic(12);var bmp=new BitmapImage();using(var ms=new MemoryStream(png)){bmp.BeginInit();bmp.CacheOption=BitmapCacheOption.OnLoad;bmp.StreamSource=ms;bmp.EndInit();bmp.Freeze();}var w=new Window{Owner=this,Title="Быстрое подключение",Width=430,Height=515,ResizeMode=ResizeMode.NoResize,WindowStartupLocation=WindowStartupLocation.CenterOwner,Background=(Brush)FindResource("Bg")};var sp=new StackPanel{Margin=new Thickness(22)};sp.Children.Add(new TextBlock{Text="Подключить телефон",FontSize=22,FontWeight=FontWeights.SemiBold,HorizontalAlignment=HorizontalAlignment.Center});sp.Children.Add(new TextBlock{Text="В мобильном приложении нажмите «Сканировать QR». IP и код заполнятся автоматически.",Foreground=(Brush)FindResource("Muted"),TextAlignment=TextAlignment.Center,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,8,0,14)});sp.Children.Add(new Border{Background=Brushes.White,Padding=new Thickness(12),HorizontalAlignment=HorizontalAlignment.Center,Child=new Image{Width=290,Height=290,Source=bmp}});sp.Children.Add(new TextBlock{Text=$"{host}:{port}    Код: {token}",FontWeight=FontWeights.SemiBold,TextAlignment=TextAlignment.Center,Margin=new Thickness(0,14,0,0)});w.Content=sp;w.ShowDialog();
+        foreach (var p in _state.Profiles)
+        {
+            if (p.Pages.Count == 0)
+                p.Pages.Add(DefaultPage("Страница 1"));
+            if (string.IsNullOrWhiteSpace(p.ActivePageId))
+                p.ActivePageId = p.Pages[0].Id;
+            foreach (var pg in p.Pages)
+                EnsureCapacity(pg);
+            _profiles.Add(p);
+        }
+
+        SaveState();
     }
 
-    object Snapshot()=>new{type="profile",profile=profile==null||page==null?null:new{name=profile.Name,rows=page.Rows,columns=page.Columns,tiles=page.Tiles.Select(t=>new{title=t.Title,hotkey=t.Hotkey,rowSpan=t.RowSpan,columnSpan=t.ColumnSpan}).ToList()}};
-    async Task SendConfig(WebSocket ws){byte[] bytes=Encoding.UTF8.GetBytes(JsonSerializer.Serialize(Snapshot(),json));await ws.SendAsync(bytes,WebSocketMessageType.Text,true,CancellationToken.None);}
-    async Task Broadcast(){List<WebSocket> copy;lock(clients)copy=clients.Where(x=>x.State==WebSocketState.Open).ToList();foreach(var ws in copy)try{await SendConfig(ws);}catch{}}
-    void SaveAndBroadcast(){if(page!=null)EnsureCapacity(page);SaveState();RebuildGrid();_=Broadcast();}
-    static string LocalIp(){try{return Dns.GetHostEntry(Dns.GetHostName()).AddressList.First(x=>x.AddressFamily==AddressFamily.InterNetwork&&!IPAddress.IsLoopback(x)).ToString();}catch{return"127.0.0.1";}}
-    string? Prompt(string title,string initial){var w=new Window{Owner=this,Title=title,Width=390,Height=165,ResizeMode=ResizeMode.NoResize,WindowStartupLocation=WindowStartupLocation.CenterOwner,Background=(Brush)FindResource("Bg")};var g=new Grid{Margin=new Thickness(16)};g.RowDefinitions.Add(new RowDefinition{Height=new GridLength(38)});g.RowDefinitions.Add(new RowDefinition());var box=new TextBox{Text=initial,Height=34};g.Children.Add(box);var sp=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Bottom};var cancel=new Button{Content="Отмена",Width=85,Margin=new Thickness(0,0,7,0)};cancel.Click+=(_,_)=>w.Close();var ok=new Button{Content="OK",Width=85};ok.Click+=(_,_)=>w.DialogResult=true;sp.Children.Add(cancel);sp.Children.Add(ok);Grid.SetRow(sp,1);g.Children.Add(sp);w.Content=g;box.SelectAll();box.Focus();return w.ShowDialog()==true&&!string.IsNullOrWhiteSpace(box.Text)?box.Text.Trim():null;}
+    private void SaveState()
+    {
+        _state.Profiles = _profiles.ToList();
+        if (_profile is not null) _state.ActiveProfileId = _profile.Id;
+        try { File.WriteAllText(_statePath, JsonSerializer.Serialize(_state, _json)); } catch { }
+    }
 
-    static void ExecuteHotkey(string hotkey){if(string.IsNullOrWhiteSpace(hotkey))return;var keys=hotkey.Split('+',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries).Select(Vk).Where(x=>x!=0).ToArray();if(keys.Length==0)return;var input=new List<INPUT>();foreach(var k in keys)input.Add(Key(k,0));for(int i=keys.Length-1;i>=0;i--)input.Add(Key(keys[i],2));SendInput((uint)input.Count,input.ToArray(),Marshal.SizeOf<INPUT>());}
-    static ushort Vk(string s){s=s.ToUpperInvariant();if(s.Length==1&&char.IsLetterOrDigit(s[0]))return s[0];if(s.StartsWith('F')&&int.TryParse(s[1..],out int f)&&f>=1&&f<=24)return(ushort)(0x70+f-1);return s switch{"CTRL"=>0x11,"SHIFT"=>0x10,"ALT"=>0x12,"WIN"=>0x5B,"ENTER"=>0x0D,"ESC"=>0x1B,"TAB"=>0x09,"SPACE"=>0x20,"LEFT"=>0x25,"UP"=>0x26,"RIGHT"=>0x27,"DOWN"=>0x28,"MEDIA_PLAY"=>0xB3,"VOLUME_MUTE"=>0xAD,"VOLUME_UP"=>0xAF,"VOLUME_DOWN"=>0xAE,_=>0};}
-    static INPUT Key(ushort k,uint f)=>new(){type=1,U=new(){ki=new(){wVk=k,dwFlags=f}}};
-    [StructLayout(LayoutKind.Sequential)]struct INPUT{public uint type;public INPUTUNION U;}[StructLayout(LayoutKind.Explicit)]struct INPUTUNION{[FieldOffset(0)]public KEYBDINPUT ki;}[StructLayout(LayoutKind.Sequential)]struct KEYBDINPUT{public ushort wVk,wScan;public uint dwFlags,time;public IntPtr dwExtraInfo;}[DllImport("user32.dll")]static extern uint SendInput(uint n,INPUT[] p,int cb);
-    protected override async void OnClosed(EventArgs e){SaveState();if(server!=null)await StopServer();base.OnClosed(e);}
+    private void RefreshTrustedDevices()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(RefreshTrustedDevices);
+            return;
+        }
+        if (TrustedDevicesList is null) return;
+        TrustedDevicesList.ItemsSource = null;
+        TrustedDevicesList.ItemsSource = _state.TrustedDevices
+            .OrderByDescending(x => x.IsOnline)
+            .ThenByDescending(x => x.LastSeenUtc)
+            .ToList();
+    }
+
+    private TrustedClient? TrustedById(string clientId)
+        => _state.TrustedDevices.FirstOrDefault(x => string.Equals(x.Id, clientId, StringComparison.Ordinal));
+
+    private static string NewDeviceSecret()
+        => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+    private bool TryAuthenticateTrusted(string clientId, string suppliedSecret)
+    {
+        var device = TrustedById(clientId);
+        if (device is null || string.IsNullOrWhiteSpace(device.Secret) || string.IsNullOrWhiteSpace(suppliedSecret)) return false;
+        var a = Encoding.UTF8.GetBytes(device.Secret);
+        var b = Encoding.UTF8.GetBytes(suppliedSecret);
+        return a.Length == b.Length && CryptographicOperations.FixedTimeEquals(a, b);
+    }
+
+    private TrustedClient PairTrustedClient(string clientId, string transport)
+    {
+        var device = TrustedById(clientId);
+        if (device is null)
+        {
+            device = new TrustedClient { Id = clientId };
+            _state.TrustedDevices.Add(device);
+        }
+        device.Secret = NewDeviceSecret();
+        device.Transport = transport;
+        device.LastSeenUtc = DateTime.UtcNow;
+        SaveState();
+        RefreshTrustedDevices();
+        return device;
+    }
+
+    private void MarkTrustedClient(string clientId, bool online, string? transport = null)
+    {
+        var device = TrustedById(clientId);
+        if (device is null) return;
+        device.IsOnline = online;
+        if (!string.IsNullOrWhiteSpace(transport)) device.Transport = transport!;
+        if (online) device.LastSeenUtc = DateTime.UtcNow;
+        SaveState();
+        RefreshTrustedDevices();
+    }
+
+    private void UpdateTrustedMetadata(string clientId, string formFactor, string? name, string transport)
+    {
+        var device = TrustedById(clientId);
+        if (device is null) return;
+        device.FormFactor = string.Equals(formFactor, "tablet", StringComparison.OrdinalIgnoreCase) ? "tablet" : "phone";
+        device.Name = string.IsNullOrWhiteSpace(name)
+            ? (device.FormFactor == "tablet" ? "Планшет" : "Телефон") + " " + (clientId.Length > 4 ? clientId[^4..] : clientId)
+            : name.Trim();
+        device.Transport = transport;
+        device.LastSeenUtc = DateTime.UtcNow;
+        SaveState();
+        RefreshTrustedDevices();
+    }
+
+    private void ForgetTrustedDevice_Click(object sender, RoutedEventArgs e)
+    {
+        if (TrustedDevicesList.SelectedItem is not TrustedClient device) return;
+        if (device.IsOnline)
+        {
+            MessageBox.Show(this, "Сначала отключите устройство, затем его можно забыть.", "MacroPad Remote");
+            return;
+        }
+        _state.TrustedDevices.RemoveAll(x => x.Id == device.Id);
+        SaveState();
+        RefreshTrustedDevices();
+    }
+
+    private void HeaderSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        SettingsPopup.IsOpen = !SettingsPopup.IsOpen;
+    }
+
+    private static Profile DefaultProfile(string name, string icon)
+    {
+        var profile = new Profile { Name = name, Icon = icon };
+        var page = DefaultPage("Страница 1");
+        profile.Pages.Add(page);
+        profile.ActivePageId = page.Id;
+        return profile;
+    }
+
+    private static DeckPage DefaultPage(string name)
+    {
+        var page = new DeckPage { Name = name, Rows = 3, Columns = 4 };
+        var defaults = new[]
+        {
+            new Tile { Title = "Сохранить", ActionType = "hotkey", Hotkey = "CTRL+S" },
+            new Tile { Title = "Скриншот", ActionType = "hotkey", Hotkey = "WIN+SHIFT+S" },
+            new Tile { Title = "Переключить окна", ActionType = "hotkey", Hotkey = "ALT+TAB" },
+            new Tile { Title = "Браузер", ActionType = "url", ActionValue = "https://www.google.com" },
+            new Tile { Title = "Назад", ActionType = "hotkey", Hotkey = "ESC" },
+            new Tile { Title = "Воспроизведение", ActionType = "media", ActionValue = "MEDIA_PLAY" },
+            new Tile { Title = "Выключить звук", ActionType = "media", ActionValue = "VOLUME_MUTE" },
+            new Tile { Title = "Рабочий стол", ActionType = "hotkey", Hotkey = "WIN+D" },
+            new Tile { Title = "Почта" }, new Tile { Title = "Калькулятор" }, new Tile { Title = "Открыть папку" }, new Tile()
+        };
+        foreach (var tile in defaults) page.Tiles.Add(tile);
+        return page;
+    }
+
+    private void ConfigureActionView()
+    {
+        var view = CollectionViewSource.GetDefaultView(_actions);
+        view.GroupDescriptions.Clear();
+        view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(ActionItem.Category)));
+        view.Filter = FilterAction;
+        ActionLibraryList.ItemsSource = view;
+    }
+
+    private bool FilterAction(object item)
+    {
+        if (item is not ActionItem action) return false;
+        var q = ActionSearchBox?.Text?.Trim() ?? "";
+        if (q.Length == 0) return true;
+        return action.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || action.Description.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || action.Category.Contains(q, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void ActionSearchBox_TextChanged(object sender, TextChangedEventArgs e)
+        => CollectionViewSource.GetDefaultView(_actions)?.Refresh();
+
+    private static IEnumerable<ActionItem> BuildActionLibrary()
+    {
+        yield return new("Система", "⌨", "Горячая клавиша", "Нажмите сочетание клавиш в инспекторе", "hotkey", "");
+        yield return new("Система", "T", "Текст", "Вставить заданный текст", "text", "");
+        yield return new("Система", "↗", "Открыть", "Программа, файл или папка", "open", "");
+        yield return new("Система", "◎", "Веб-сайт", "Открыть URL в браузере", "url", "https://");
+        yield return new("MacroPad Remote", "□", "Папка", "Открыть вложенную страницу", "folder", "");
+        yield return new("MacroPad Remote", "≡", "Multi Action", "Несколько действий по очереди", "multi", "");
+        yield return new("MacroPad Remote", "⇄", "Переключить профиль", "Активировать другой профиль", "profile", "");
+        yield return new("Мультимедиа", "▶", "Play / Pause", "Управление воспроизведением", "media", "MEDIA_PLAY");
+        yield return new("Мультимедиа", "+", "Громкость +", "Увеличить громкость", "media", "VOLUME_UP");
+        yield return new("Мультимедиа", "−", "Громкость −", "Уменьшить громкость", "media", "VOLUME_DOWN");
+        yield return new("Мультимедиа", "◖", "Mute", "Включить/выключить звук", "media", "VOLUME_MUTE");
+        yield return new("Популярное", "▣", "Сохранить", "CTRL + S", "hotkey", "CTRL+S");
+        yield return new("Популярное", "⌗", "Скриншот", "WIN + SHIFT + S", "hotkey", "WIN+SHIFT+S");
+        yield return new("Популярное", "⇥", "Переключить окна", "ALT + TAB", "hotkey", "ALT+TAB");
+        yield return new("Популярное", "▤", "Копировать", "CTRL + C", "hotkey", "CTRL+C");
+        yield return new("Популярное", "▥", "Вставить", "CTRL + V", "hotkey", "CTRL+V");
+    }
+
+    private void RefreshProfiles()
+    {
+        _updating = true;
+        ProfileBox.ItemsSource = null;
+        ProfileBox.ItemsSource = _profiles;
+        _profile = _profiles.FirstOrDefault(x => x.Id == _state.ActiveProfileId) ?? _profiles.First();
+        ProfileBox.SelectedItem = _profile;
+        _updating = false;
+        LoadProfile();
+    }
+
+    private void LoadProfile()
+    {
+        if (_profile is null) return;
+        if (_profile.Pages.Count == 0) _profile.Pages.Add(DefaultPage("Страница 1"));
+        _page = _profile.Pages.FirstOrDefault(x => x.Id == _profile.ActivePageId) ?? _profile.Pages[0];
+        _profile.ActivePageId = _page.Id;
+
+        _updating = true;
+        ProfileTitle.Text = _profile.Name;
+        ProfileName.Text = _profile.Name;
+        ProfileDescription.Text = _profile.Description;
+        ColumnsBox.Text = _page.Columns.ToString();
+        RowsBox.Text = _page.Rows.ToString();
+        _userZoom = Math.Clamp(_page.Zoom, ZoomSlider.Minimum, ZoomSlider.Maximum);
+        ZoomSlider.Value = _userZoom;
+        PageBox.ItemsSource = null;
+        PageBox.ItemsSource = _profile.Pages;
+        PageBox.SelectedItem = _page;
+        _updating = false;
+
+        _selected = null;
+        _selectedButton = null;
+        RefreshInspector();
+        RebuildPages();
+        RebuildGrid();
+    }
+
+    private void RebuildPages()
+    {
+        if (_profile is null || _page is null) return;
+        PageButtons.Children.Clear();
+        var index = _profile.Pages.IndexOf(_page) + 1;
+        PageInfo.Text = $"Страница {index} из {_profile.Pages.Count}";
+
+        for (var i = 0; i < _profile.Pages.Count; i++)
+        {
+            var page = _profile.Pages[i];
+            var selected = page.Id == _page.Id;
+            var button = new Button
+            {
+                Content = (i + 1).ToString(),
+                Width = 34,
+                Height = 32,
+                Margin = new Thickness(3, 0, 3, 0),
+                Tag = page,
+                ToolTip = page.Name,
+                Background = new SolidColorBrush(selected ? Color.FromRgb(53, 58, 62) : Color.FromRgb(36, 39, 42)),
+                Foreground = Brushes.White,
+                BorderBrush = selected ? (Brush)FindResource("Blue") : (Brush)FindResource("Border")
+            };
+            button.Click += (_, _) =>
+            {
+                _profile.ActivePageId = page.Id;
+                SaveState();
+                LoadProfile();
+                _ = BroadcastSnapshotAsync();
+            };
+
+            var menu = new ContextMenu();
+            var rename = new MenuItem { Header = "Переименовать страницу" };
+            rename.Click += (_, _) => RenamePage(page);
+            menu.Items.Add(rename);
+            var delete = new MenuItem { Header = "Удалить страницу", IsEnabled = _profile.Pages.Count > 1 };
+            delete.Click += (_, _) => DeletePage(page);
+            menu.Items.Add(delete);
+            button.ContextMenu = menu;
+            PageButtons.Children.Add(button);
+        }
+
+        var plus = new Button
+        {
+            Content = "+",
+            Width = 34,
+            Height = 32,
+            Margin = new Thickness(7, 0, 3, 0),
+            ToolTip = "Добавить страницу",
+            Foreground = Brushes.White,
+            Background = (Brush)FindResource("Panel2")
+        };
+        plus.Click += AddPage_Click;
+        PageButtons.Children.Add(plus);
+    }
+
+    private void RenamePage(DeckPage page)
+    {
+        var name = Prompt("Переименовать страницу", page.Name);
+        if (string.IsNullOrWhiteSpace(name)) return;
+        page.Name = name;
+        SaveState();
+        LoadProfile();
+        _ = BroadcastSnapshotAsync();
+    }
+
+    private void DeletePage(DeckPage page)
+    {
+        if (_profile is null || _profile.Pages.Count <= 1) return;
+        if (MessageBox.Show(this, $"Удалить страницу «{page.Name}»?", "MacroPad Remote", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        var index = _profile.Pages.IndexOf(page);
+        _profile.Pages.Remove(page);
+        var next = _profile.Pages[Math.Clamp(index - 1, 0, _profile.Pages.Count - 1)];
+        _profile.ActivePageId = next.Id;
+        SaveState();
+        LoadProfile();
+        _ = BroadcastSnapshotAsync();
+    }
+
+    private void RebuildGrid()
+    {
+        if (_page is null) return;
+        EnsureCapacity(_page);
+        DeckGrid.Children.Clear();
+        DeckGrid.RowDefinitions.Clear();
+        DeckGrid.ColumnDefinitions.Clear();
+        for (var r = 0; r < _page.Rows; r++) DeckGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(116) });
+        for (var c = 0; c < _page.Columns; c++) DeckGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(142) });
+
+        GridInfo.Text = $"{_page.Columns} × {_page.Rows}  •  {_page.Columns * _page.Rows} ячеек";
+        var used = new bool[_page.Rows, _page.Columns];
+        var number = 1;
+        foreach (var tile in _page.Tiles)
+        {
+            var pos = FindSpace(used, tile, _page.Rows, _page.Columns);
+            if (pos is null) continue;
+            var (row, column) = pos.Value;
+            var rowSpan = Math.Min(Math.Max(1, tile.RowSpan), _page.Rows - row);
+            var columnSpan = Math.Min(Math.Max(1, tile.ColumnSpan), _page.Columns - column);
+            Mark(used, row, column, rowSpan, columnSpan);
+            var button = TileButton(tile, number++);
+            Grid.SetRow(button, row); Grid.SetColumn(button, column); Grid.SetRowSpan(button, rowSpan); Grid.SetColumnSpan(button, columnSpan);
+            DeckGrid.Children.Add(button);
+        }
+        Dispatcher.BeginInvoke(UpdateZoom, DispatcherPriority.Background);
+    }
+
+    private Button TileButton(Tile tile, int number)
+    {
+        var blank = IsBlank(tile);
+        var button = new Button
+        {
+            Tag = tile, Margin = new Thickness(5), Padding = new Thickness(10), MinWidth = 125, MinHeight = 100,
+            Background = new SolidColorBrush(blank ? Color.FromRgb(32, 35, 38) : Color.FromRgb(39, 43, 46)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(20, 22, 24)), BorderThickness = new Thickness(2),
+            AllowDrop = true
+        };
+
+        var root = new Grid();
+        var stack = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        stack.Children.Add(new TextBlock { Text = Glyph(tile), FontSize = 26, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 7), Foreground = blank ? Brushes.Gray : Brushes.White });
+        stack.Children.Add(new TextBlock { Text = tile.Title, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.SemiBold, Foreground = blank ? Brushes.Gray : Brushes.White, MaxWidth = 180 });
+        var actionCaption = ActionCaption(tile);
+        if (!string.IsNullOrWhiteSpace(actionCaption))
+            stack.Children.Add(new TextBlock { Text = actionCaption, FontSize = 9, Foreground = (Brush)FindResource("Muted"), HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 4, 0, 0), MaxWidth = 180, TextTrimming = TextTrimming.CharacterEllipsis });
+        root.Children.Add(stack);
+        if (ShowNumbers.IsChecked == true)
+            root.Children.Add(new TextBlock { Text = number.ToString(), FontSize = 10, Foreground = Brushes.Gray, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top });
+        button.Content = root;
+
+        button.Click += (_, _) => SelectTile(button, tile);
+        button.MouseDoubleClick += (_, _) => FocusTile(button);
+        button.DragOver += Tile_DragOver;
+        button.Drop += Tile_Drop;
+        button.ContextMenu = TileMenu(tile);
+        return button;
+    }
+
+    private static string ActionCaption(Tile tile) => tile.ActionType switch
+    {
+        "hotkey" => tile.Hotkey,
+        "text" => "Текст",
+        "open" => Path.GetFileName(tile.ActionValue),
+        "url" => tile.ActionValue,
+        "folder" => "Папка",
+        "multi" => $"{tile.Steps.Count} действий",
+        "profile" => "Профиль",
+        "media" => tile.ActionValue,
+        _ => ""
+    };
+
+    private void SelectTile(Button button, Tile tile)
+    {
+        if (_selectedButton is not null) _selectedButton.BorderBrush = new SolidColorBrush(Color.FromRgb(20, 22, 24));
+        _selectedButton = button;
+        _selected = tile;
+        button.BorderBrush = (Brush)FindResource("Blue");
+        RefreshInspector();
+    }
+
+    private void RefreshInspector()
+    {
+        _updating = true;
+        var enabled = _selected is not null;
+        InspectorTitleBox.IsEnabled = enabled;
+        InspectorTypeBox.IsEnabled = enabled;
+        InspectorValueBox.IsEnabled = enabled;
+        InspectorHotkeyBox.IsEnabled = enabled;
+        RecordHotkeyButton.IsEnabled = enabled;
+
+        if (_selected is null)
+        {
+            InspectorHint.Text = "Выберите плитку или перетащите действие из каталога на рабочее поле.";
+            InspectorTitleBox.Text = "";
+            InspectorTypeBox.Text = "";
+            InspectorValueBox.Text = "";
+            InspectorHotkeyBox.Text = "";
+            InspectorValueLabel.Text = "Параметр";
+        }
+        else
+        {
+            InspectorHint.Text = "Настройка выполняется на ПК. Изменения сразу синхронизируются с подключенным телефоном.";
+            InspectorTitleBox.Text = _selected.Title;
+            InspectorTypeBox.Text = ActionTypeName(_selected.ActionType);
+            InspectorValueBox.Text = _selected.ActionValue;
+            InspectorHotkeyBox.Text = _selected.Hotkey;
+            InspectorValueLabel.Text = _selected.ActionType switch
+            {
+                "text" => "Текст",
+                "open" => "Путь к программе / файлу / папке",
+                "url" => "URL",
+                "folder" => "ID / имя страницы",
+                "profile" => "ID / имя профиля",
+                "media" => "Медиа-команда",
+                _ => "Параметр"
+            };
+        }
+        _updating = false;
+    }
+
+    private static string ActionTypeName(string type) => type switch
+    {
+        "hotkey" => "Горячая клавиша",
+        "text" => "Текст",
+        "open" => "Открыть",
+        "url" => "Веб-сайт",
+        "folder" => "Папка",
+        "multi" => "Multi Action",
+        "profile" => "Переключить профиль",
+        "media" => "Мультимедиа",
+        _ => "Не назначено"
+    };
+
+    private void ActionLibrary_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        => _actionDragStart = e.GetPosition(this);
+
+    private void ActionLibrary_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || ActionLibraryList.SelectedItem is not ActionItem action) return;
+        var current = e.GetPosition(this);
+        if (Math.Abs(current.X - _actionDragStart.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(current.Y - _actionDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        DragDrop.DoDragDrop(ActionLibraryList, new DataObject("MacroPadAction", action), DragDropEffects.Copy);
+    }
+
+    private void ActionLibrary_DoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (_selected is null || ActionLibraryList.SelectedItem is not ActionItem action) return;
+        AssignAction(_selected, action);
+        SaveAndBroadcast();
+        RefreshInspector();
+    }
+
+    private void Tile_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent("MacroPadAction") ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void Tile_Drop(object sender, DragEventArgs e)
+    {
+        if (sender is not Button { Tag: Tile tile } button || e.Data.GetData("MacroPadAction") is not ActionItem action) return;
+        AssignAction(tile, action);
+        SelectTile(button, tile);
+        SaveAndBroadcast();
+        e.Handled = true;
+    }
+
+    private void AssignAction(Tile tile, ActionItem action)
+    {
+        tile.Title = action.Title;
+        tile.ActionType = action.Type;
+        tile.ActionValue = action.Value;
+        tile.Hotkey = action.Type == "hotkey" ? action.Value : "";
+        if (action.Type != "multi") tile.Steps.Clear();
+
+        if (action.Type == "folder" && _profile is not null)
+        {
+            var newPage = new DeckPage { Name = $"Папка {_profile.Pages.Count + 1}", Rows = 3, Columns = 4 };
+            EnsureCapacity(newPage);
+            _profile.Pages.Add(newPage);
+            tile.ActionValue = newPage.Id;
+            tile.Title = newPage.Name;
+        }
+        else if (action.Type == "profile" && _profiles.Count > 0)
+        {
+            var target = _profiles.FirstOrDefault(p => p.Id != _profile?.Id) ?? _profiles[0];
+            tile.ActionValue = target.Id;
+            tile.Title = target.Name;
+        }
+    }
+
+    private ContextMenu TileMenu(Tile tile)
+    {
+        var menu = new ContextMenu();
+        var properties = new MenuItem { Header = "Свойства действия" };
+        properties.Click += (_, _) =>
+        {
+            var button = DeckGrid.Children.OfType<Button>().FirstOrDefault(b => ReferenceEquals(b.Tag, tile));
+            if (button is not null) SelectTile(button, tile);
+            InspectorTitleBox.Focus();
+        };
+        menu.Items.Add(properties);
+
+        var test = new MenuItem { Header = "Выполнить тест" };
+        test.Click += async (_, _) => await ExecuteTileAsync(tile);
+        menu.Items.Add(test);
+
+        var multi = new MenuItem { Header = "Создать Multi Action" };
+        multi.Click += (_, _) =>
+        {
+            tile.ActionType = "multi"; tile.Title = "Multi Action"; tile.Hotkey = ""; tile.ActionValue = "";
+            if (tile.Steps.Count == 0) tile.Steps.Add(new ActionStep { Type = "hotkey", Value = "CTRL+S", DelayMs = 100 });
+            SaveAndBroadcast(); RefreshInspector();
+        };
+        menu.Items.Add(multi);
+
+        var folder = new MenuItem { Header = "Создать папку" };
+        folder.Click += (_, _) => AssignAction(tile, new ActionItem("MacroPad Remote", "□", "Папка", "", "folder", ""));
+        folder.Click += (_, _) => { SaveAndBroadcast(); RefreshInspector(); };
+        menu.Items.Add(folder);
+        menu.Items.Add(new Separator());
+
+        var size = new MenuItem { Header = "Размер ячейки" };
+        foreach (var option in new[] { ("1 × 1", 1, 1), ("2 × 1", 2, 1), ("1 × 2", 1, 2), ("2 × 2", 2, 2), ("3 × 1", 3, 1), ("1 × 3", 1, 3) })
+        {
+            var columns = option.Item2; var rows = option.Item3;
+            var item = new MenuItem { Header = option.Item1, IsCheckable = true, IsChecked = tile.ColumnSpan == columns && tile.RowSpan == rows };
+            item.Click += (_, _) => ResizeTile(tile, columns, rows);
+            size.Items.Add(item);
+        }
+        menu.Items.Add(size);
+        menu.Items.Add(new Separator());
+        var clear = new MenuItem { Header = "Очистить ячейку" };
+        clear.Click += (_, _) => ClearTile(tile);
+        menu.Items.Add(clear);
+        return menu;
+    }
+
+    private void RecordHotkey_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selected is null) return;
+        _capturingHotkey = true;
+        RecordHotkeyButton.Content = "Нажмите…";
+        RecordHotkeyButton.Focus();
+        Keyboard.Focus(RecordHotkeyButton);
+    }
+
+    private void RecordHotkey_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (!_capturingHotkey || _selected is null) return;
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        var tokens = new List<string>();
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) tokens.Add("CTRL");
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Alt)) tokens.Add("ALT");
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) tokens.Add("SHIFT");
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Windows)) tokens.Add("WIN");
+        tokens.Add(KeyToToken(key));
+        var hotkey = string.Join('+', tokens.Where(x => !string.IsNullOrWhiteSpace(x)));
+
+        _selected.ActionType = "hotkey";
+        _selected.Hotkey = hotkey;
+        _selected.ActionValue = "";
+        InspectorHotkeyBox.Text = hotkey;
+        InspectorTypeBox.Text = ActionTypeName("hotkey");
+        _capturingHotkey = false;
+        RecordHotkeyButton.Content = "Записать";
+        e.Handled = true;
+        SaveAndBroadcast();
+    }
+
+    private static string KeyToToken(Key key)
+    {
+        if (key is >= Key.D0 and <= Key.D9) return ((int)key - (int)Key.D0).ToString();
+        if (key is >= Key.NumPad0 and <= Key.NumPad9) return $"NUM{(int)key - (int)Key.NumPad0}";
+        return key switch
+        {
+            Key.Return => "ENTER", Key.Escape => "ESC", Key.Back => "BACKSPACE", Key.Delete => "DELETE", Key.Insert => "INSERT",
+            Key.Space => "SPACE", Key.Tab => "TAB", Key.Left => "LEFT", Key.Right => "RIGHT", Key.Up => "UP", Key.Down => "DOWN",
+            Key.Home => "HOME", Key.End => "END", Key.PageUp => "PAGEUP", Key.PageDown => "PAGEDOWN",
+            _ => key.ToString().ToUpperInvariant()
+        };
+    }
+
+    private void InspectorChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_updating || _selected is null) return;
+    }
+
+    private void ApplyInspector_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selected is null) return;
+        _selected.Title = string.IsNullOrWhiteSpace(InspectorTitleBox.Text) ? "Кнопка" : InspectorTitleBox.Text.Trim();
+        _selected.ActionValue = InspectorValueBox.Text.Trim();
+        if (_selected.ActionType == "hotkey") _selected.Hotkey = InspectorHotkeyBox.Text.Trim().ToUpperInvariant();
+        SaveAndBroadcast();
+        RefreshInspector();
+    }
+
+    private void ClearTile_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selected is null) return;
+        ClearTile(_selected);
+    }
+
+    private void ClearTile(Tile tile)
+    {
+        tile.Title = "Добавить"; tile.ActionType = ""; tile.ActionValue = ""; tile.Hotkey = ""; tile.ColumnSpan = tile.RowSpan = 1; tile.Steps.Clear();
+        EnsureCapacity(_page!); SaveAndBroadcast(); RefreshInspector();
+    }
+
+    private void ResizeTile(Tile tile, int columns, int rows)
+    {
+        if (_page is null) return;
+        columns = Math.Clamp(columns, 1, _page.Columns); rows = Math.Clamp(rows, 1, _page.Rows);
+        var extra = columns * rows - Math.Max(1, tile.ColumnSpan) * Math.Max(1, tile.RowSpan);
+        if (extra > 0)
+        {
+            var blanks = _page.Tiles.Where(x => !ReferenceEquals(x, tile) && IsBlank(x)).Take(extra).ToList();
+            if (blanks.Count < extra) { MessageBox.Show(this, "Недостаточно свободных пустых ячеек.", "MacroPad Remote"); return; }
+            foreach (var blank in blanks) _page.Tiles.Remove(blank);
+        }
+        tile.ColumnSpan = columns; tile.RowSpan = rows; EnsureCapacity(_page); SaveAndBroadcast();
+    }
+
+    private async Task ExecuteTileAsync(Tile tile)
+    {
+        try
+        {
+            switch (tile.ActionType)
+            {
+                case "hotkey": ExecuteHotkey(tile.Hotkey); break;
+                case "text": SendText(tile.ActionValue); break;
+                case "open":
+                    if (!string.IsNullOrWhiteSpace(tile.ActionValue)) Process.Start(new ProcessStartInfo(tile.ActionValue) { UseShellExecute = true });
+                    break;
+                case "url":
+                    if (!string.IsNullOrWhiteSpace(tile.ActionValue)) Process.Start(new ProcessStartInfo(tile.ActionValue) { UseShellExecute = true });
+                    break;
+                case "media": ExecuteHotkey(tile.ActionValue); break;
+                case "folder":
+                    if (_profile is not null)
+                    {
+                        var target = _profile.Pages.FirstOrDefault(p => p.Id == tile.ActionValue || string.Equals(p.Name, tile.ActionValue, StringComparison.OrdinalIgnoreCase));
+                        if (target is not null) { _profile.ActivePageId = target.Id; SaveState(); LoadProfile(); await BroadcastSnapshotAsync(); }
+                    }
+                    break;
+                case "profile":
+                    var profile = _profiles.FirstOrDefault(p => p.Id == tile.ActionValue || string.Equals(p.Name, tile.ActionValue, StringComparison.OrdinalIgnoreCase));
+                    if (profile is not null) { _state.ActiveProfileId = profile.Id; SaveState(); RefreshProfiles(); await BroadcastSnapshotAsync(); }
+                    break;
+                case "multi":
+                    foreach (var step in tile.Steps)
+                    {
+                        await ExecuteStepAsync(step);
+                        if (step.DelayMs > 0) await Task.Delay(Math.Clamp(step.DelayMs, 0, 60000));
+                    }
+                    break;
+                default:
+                    if (!string.IsNullOrWhiteSpace(tile.Hotkey)) ExecuteHotkey(tile.Hotkey);
+                    break;
+            }
+            Dispatcher.Invoke(() => DeviceStatus.Text = $"Выполнено: {tile.Title}");
+        }
+        catch (Exception ex)
+        {
+            Dispatcher.Invoke(() => DeviceStatus.Text = $"Ошибка действия «{tile.Title}»: {ex.Message}");
+        }
+    }
+
+    private Task ExecuteStepAsync(ActionStep step)
+    {
+        switch (step.Type)
+        {
+            case "hotkey": ExecuteHotkey(step.Value); break;
+            case "text": SendText(step.Value); break;
+            case "open": if (!string.IsNullOrWhiteSpace(step.Value)) Process.Start(new ProcessStartInfo(step.Value) { UseShellExecute = true }); break;
+            case "media": ExecuteHotkey(step.Value); break;
+        }
+        return Task.CompletedTask;
+    }
+
+    private void ProfileBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updating || ProfileBox.SelectedItem is not Profile selected) return;
+        _profile = selected; _state.ActiveProfileId = selected.Id; SaveState(); LoadProfile(); _ = BroadcastSnapshotAsync();
+    }
+
+    private void PageBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updating || _profile is null || PageBox.SelectedItem is not DeckPage selected) return;
+        _profile.ActivePageId = selected.Id; SaveState(); LoadProfile(); _ = BroadcastSnapshotAsync();
+    }
+
+    private void AddProfile_Click(object sender, RoutedEventArgs e)
+    {
+        var name = Prompt("Новый профиль", $"Профиль {_profiles.Count + 1}");
+        if (name is null) return;
+        var profile = DefaultProfile(name, name[..1].ToUpperInvariant());
+        _profiles.Add(profile); _state.ActiveProfileId = profile.Id; SaveState(); RefreshProfiles();
+    }
+
+    private void DeleteProfile_Click(object sender, RoutedEventArgs e)
+    {
+        if (_profile is null || _profiles.Count <= 1) return;
+        if (MessageBox.Show(this, $"Удалить профиль «{_profile.Name}»?", "MacroPad Remote", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
+        _profiles.Remove(_profile); _state.ActiveProfileId = _profiles[0].Id; SaveState(); RefreshProfiles(); _ = BroadcastSnapshotAsync();
+    }
+
+    private void ProfileMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: Profile profile } button) return;
+        ProfileBox.SelectedItem = profile;
+        var menu = new ContextMenu();
+        var rename = new MenuItem { Header = "Переименовать" };
+        rename.Click += (_, _) => { var name = Prompt("Переименовать профиль", profile.Name); if (name is null) return; profile.Name = name; SaveState(); RefreshProfiles(); };
+        var copy = new MenuItem { Header = "Создать копию" };
+        copy.Click += (_, _) =>
+        {
+            var clone = JsonSerializer.Deserialize<Profile>(JsonSerializer.Serialize(profile, _json), _json)!;
+            clone.Id = Guid.NewGuid().ToString("N"); clone.Name += " copy";
+            foreach (var pg in clone.Pages) { pg.Id = Guid.NewGuid().ToString("N"); foreach (var tile in pg.Tiles) tile.Id = Guid.NewGuid().ToString("N"); }
+            clone.ActivePageId = clone.Pages[0].Id; _profiles.Add(clone); _state.ActiveProfileId = clone.Id; SaveState(); RefreshProfiles();
+        };
+        var delete = new MenuItem { Header = "Удалить" }; delete.Click += DeleteProfile_Click;
+        menu.Items.Add(rename); menu.Items.Add(copy); menu.Items.Add(new Separator()); menu.Items.Add(delete);
+        button.ContextMenu = menu; menu.PlacementTarget = button; menu.IsOpen = true; e.Handled = true;
+    }
+
+    private void AddPage_Click(object sender, RoutedEventArgs e)
+    {
+        if (_profile is null) return;
+        var name = Prompt("Новая страница", $"Страница {_profile.Pages.Count + 1}");
+        if (name is null) return;
+        var page = DefaultPage(name); _profile.Pages.Add(page); _profile.ActivePageId = page.Id; SaveState(); LoadProfile(); _ = BroadcastSnapshotAsync();
+    }
+
+    private void SaveProfile_Click(object sender, RoutedEventArgs e)
+    {
+        if (_profile is null || _page is null) return;
+        if (!string.IsNullOrWhiteSpace(ProfileName.Text)) _profile.Name = ProfileName.Text.Trim();
+        _profile.Description = ProfileDescription.Text.Trim();
+        var columns = int.TryParse(ColumnsBox.Text, out var c) ? Math.Clamp(c, 1, 12) : _page.Columns;
+        var rows = int.TryParse(RowsBox.Text, out var r) ? Math.Clamp(r, 1, 12) : _page.Rows;
+        if (ConfiguredArea(_page) > columns * rows) { MessageBox.Show(this, "Новая сетка слишком мала для уже настроенных плиток.", "MacroPad Remote"); return; }
+        _page.Columns = columns; _page.Rows = rows; EnsureCapacity(_page); SaveState(); RefreshProfiles(); _ = BroadcastSnapshotAsync();
+    }
+
+    private void UpdateZoom()
+    {
+        if (_page is null || !IsLoaded) return;
+        DeckGrid.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        var desired = DeckGrid.DesiredSize;
+        if (desired.Width <= 0 || desired.Height <= 0) return;
+        var width = Math.Max(1, DeckViewport.ViewportWidth - 48); var height = Math.Max(1, DeckViewport.ViewportHeight - 48);
+        _fitScale = Math.Clamp(Math.Min(width / desired.Width, height / desired.Height), .28, 1);
+        DeckScaleHost.LayoutTransform = new ScaleTransform(_fitScale * _userZoom, _fitScale * _userZoom);
+    }
+
+    private void DeckViewport_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateZoom();
+
+    private void ZoomSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_updating || _page is null || !IsLoaded) return;
+        _userZoom = ZoomSlider.Value; _page.Zoom = _userZoom; SaveState(); UpdateZoom();
+    }
+
+    private void DeckViewport_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return;
+        e.Handled = true;
+        var pointer = e.GetPosition(DeckViewport);
+        var old = Math.Max(.01, _fitScale * _userZoom);
+        var logicalX = (DeckViewport.HorizontalOffset + pointer.X) / old;
+        var logicalY = (DeckViewport.VerticalOffset + pointer.Y) / old;
+        _userZoom = Math.Clamp(_userZoom + (e.Delta > 0 ? .12 : -.12), ZoomSlider.Minimum, ZoomSlider.Maximum);
+        _updating = true; ZoomSlider.Value = _userZoom; _updating = false;
+        if (_page is not null) _page.Zoom = _userZoom; SaveState(); UpdateZoom();
+        Dispatcher.BeginInvoke(() =>
+        {
+            var next = _fitScale * _userZoom;
+            DeckViewport.ScrollToHorizontalOffset(Math.Max(0, logicalX * next - pointer.X));
+            DeckViewport.ScrollToVerticalOffset(Math.Max(0, logicalY * next - pointer.Y));
+        }, DispatcherPriority.Background);
+    }
+
+    private void FocusTile(FrameworkElement element)
+    {
+        _userZoom = Math.Max(_userZoom, 1.5); _updating = true; ZoomSlider.Value = _userZoom; _updating = false;
+        if (_page is not null) _page.Zoom = _userZoom; UpdateZoom();
+        Dispatcher.BeginInvoke(() =>
+        {
+            try
+            {
+                var bounds = element.TransformToAncestor(DeckGrid).TransformBounds(new Rect(new Point(), element.RenderSize));
+                var scale = _fitScale * _userZoom;
+                DeckViewport.ScrollToHorizontalOffset(Math.Max(0, (bounds.Left + bounds.Width / 2) * scale - DeckViewport.ViewportWidth / 2));
+                DeckViewport.ScrollToVerticalOffset(Math.Max(0, (bounds.Top + bounds.Height / 2) * scale - DeckViewport.ViewportHeight / 2));
+            }
+            catch { }
+        }, DispatcherPriority.Background);
+    }
+
+    private string SelectedTransport()
+        => TransportBox.SelectedItem is ComboBoxItem item && item.Tag?.ToString() == "Bluetooth" ? "Bluetooth" : "Wifi";
+
+    private void ApplyTransport()
+    {
+        _updating = true;
+        var wanted = _state.Transport == "Bluetooth" ? "Bluetooth" : "Wifi";
+        foreach (var item in TransportBox.Items.OfType<ComboBoxItem>())
+            if (item.Tag?.ToString() == wanted) { TransportBox.SelectedItem = item; break; }
+        _updating = false;
+        SyncConnectionUi();
+    }
+
+    private async void TransportBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updating) return;
+        await StopAllTransportsAsync();
+        _state.Transport = SelectedTransport();
+        SaveState();
+        await StartSelectedTransportAsync();
+        SettingsPopup.IsOpen = false;
+    }
+
+    private async Task StartSelectedTransportAsync()
+    {
+        if (SelectedTransport() == "Bluetooth")
+            await StartBleAsync();
+        else
+            await StartWifiAsync();
+        SyncConnectionUi();
+    }
+
+    private async Task StopAllTransportsAsync()
+    {
+        await StopWifiAsync();
+        if (!string.IsNullOrWhiteSpace(_bleClientId))
+            MarkTrustedClient(_bleClientId, false, "Bluetooth");
+        _bleClientId = "";
+        await _ble.StopAsync();
+        _bleAuthenticated = false;
+    }
+
+    private void SyncConnectionUi()
+    {
+        var wifi = SelectedTransport() == "Wifi";
+        ConnectionModeText.Text = wifi ? "Wi‑Fi" : "Bluetooth LE";
+        DeviceQrButton.IsEnabled = HeaderQrButton.IsEnabled = true;
+        DeviceServerButton.Content = HeaderServerButton.Content = "Перезапустить связь";
+        if (wifi)
+        {
+            ConnectionDetails.Text = _server is null
+                ? "Wi‑Fi: запуск…"
+                : $"{LocalIp()}:{WebSocketPort} • устройства в сети видят этот ПК автоматически";
+        }
+        else
+        {
+            ConnectionDetails.Text = _ble.IsRunning
+                ? $"BLE GATT активен • Service {_bleServiceShort}"
+                : "Bluetooth LE: запуск…";
+        }
+    }
+
+    private string _bleServiceShort => BleGattServer.ServiceUuid.ToString()[..8];
+
+    private async void ServerButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await StopAllTransportsAsync();
+            await StartSelectedTransportAsync();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Не удалось перезапустить связь.\n\n{ex.Message}", "MacroPad Remote");
+        }
+    }
+
+    private async Task StartWifiAsync()
+    {
+        if (_server is not null) return;
+        RotatePairToken();
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls($"http://0.0.0.0:{WebSocketPort}");
+        var app = builder.Build();
+        app.UseWebSockets();
+        app.Map("/ws", HandleWebSocketAsync);
+        await app.StartAsync();
+        _server = app;
+        await _lanDiscovery.StartAsync();
+        DeviceStatus.Text = "ПК виден в локальной сети • ожидается QR";
+        HeaderStatus.Text = "Wi‑Fi активен • требуется QR";
+        HeaderDot.Foreground = Brushes.Gold;
+    }
+
+    private async Task StopWifiAsync()
+    {
+        await _lanDiscovery.StopAsync();
+        if (_server is not null)
+        {
+            try { await _server.StopAsync(); await _server.DisposeAsync(); } catch { }
+            _server = null;
+        }
+        List<WebSocket> sockets;
+        List<string> clientIds;
+        lock (_clients)
+        {
+            sockets = _clients.ToList();
+            clientIds = _clientIds.Values.Distinct().ToList();
+            _clients.Clear();
+            _clientIds.Clear();
+        }
+        foreach (var socket in sockets)
+            try { await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Server stopped", CancellationToken.None); } catch { }
+        foreach (var id in clientIds) MarkTrustedClient(id, false, "Wi‑Fi");
+        UpdateConnectionStatus();
+    }
+
+    private async Task HandleWebSocketAsync(HttpContext context)
+    {
+        if (!context.WebSockets.IsWebSocketRequest)
+        {
+            context.Response.StatusCode = 400;
+            return;
+        }
+
+        var clientId = context.Request.Query["clientId"].ToString();
+        var suppliedPairToken = context.Request.Query["token"].ToString();
+        var suppliedDeviceToken = context.Request.Query["deviceToken"].ToString();
+        if (string.IsNullOrWhiteSpace(clientId))
+        {
+            context.Response.StatusCode = 401;
+            return;
+        }
+
+        string? newDeviceSecret = null;
+        var trusted = TryAuthenticateTrusted(clientId, suppliedDeviceToken);
+        if (!trusted)
+        {
+            if (!ConsumePairToken(suppliedPairToken))
+            {
+                context.Response.StatusCode = 401;
+                return;
+            }
+            var paired = PairTrustedClient(clientId, "Wi‑Fi");
+            newDeviceSecret = paired.Secret;
+        }
+
+        var socket = await context.WebSockets.AcceptWebSocketAsync();
+        lock (_clients)
+        {
+            _clients.Add(socket);
+            _clientIds[socket] = clientId;
+        }
+        MarkTrustedClient(clientId, true, "Wi‑Fi");
+        Dispatcher.Invoke(UpdateConnectionStatus);
+
+        if (!string.IsNullOrWhiteSpace(newDeviceSecret))
+        {
+            await SendJsonAsync(socket, new
+            {
+                type = "paired",
+                serverId = _state.ServerId,
+                serverName = Environment.MachineName,
+                deviceToken = newDeviceSecret,
+                transport = "wifi"
+            });
+        }
+        await SendSnapshotAsync(socket);
+
+        var buffer = new byte[64 * 1024];
+        try
+        {
+            while (socket.State == WebSocketState.Open)
+            {
+                using var message = new MemoryStream();
+                WebSocketReceiveResult result;
+                do
+                {
+                    result = await socket.ReceiveAsync(buffer, CancellationToken.None);
+                    if (result.MessageType == WebSocketMessageType.Close) break;
+                    message.Write(buffer, 0, result.Count);
+                }
+                while (!result.EndOfMessage);
+
+                if (result.MessageType == WebSocketMessageType.Close) break;
+                var text = Encoding.UTF8.GetString(message.ToArray());
+                await HandleRemoteMessageAsync(text, clientId);
+            }
+        }
+        catch (Exception ex)
+        {
+            Dispatcher.Invoke(() => DeviceStatus.Text = $"Ошибка канала устройства: {ex.Message}");
+        }
+        finally
+        {
+            bool stillOnline;
+            lock (_clients)
+            {
+                _clients.Remove(socket);
+                _clientIds.Remove(socket);
+                stillOnline = _clientIds.Values.Any(x => x == clientId);
+            }
+            if (!stillOnline) MarkTrustedClient(clientId, false, "Wi‑Fi");
+            Dispatcher.Invoke(UpdateConnectionStatus);
+        }
+    }
+
+    private static async Task SendJsonAsync(WebSocket socket, object payload)
+    {
+        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+        await socket.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None);
+    }
+
+    private async Task StartBleAsync()
+    {
+        RotatePairToken();
+        _bleAuthenticated = false;
+        await _ble.StartAsync();
+        await _ble.SetSnapshotAsync(JsonSerializer.Serialize(Snapshot(), _json));
+        DeviceStatus.Text = "Bluetooth LE активен • готов к подключению";
+        HeaderStatus.Text = "Bluetooth LE активен";
+        HeaderDot.Foreground = Brushes.Gold;
+    }
+
+    private async Task HandleBleMessageAsync(string message)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(message);
+            var root = doc.RootElement;
+            var type = root.TryGetProperty("type", out var typeProp) ? typeProp.GetString() ?? "" : "";
+            if (!_bleAuthenticated)
+            {
+                if (type != "auth") return;
+                var clientId = root.TryGetProperty("clientId", out var clientProp) ? clientProp.GetString() ?? "" : "";
+                var deviceToken = root.TryGetProperty("deviceToken", out var deviceTokenProp) ? deviceTokenProp.GetString() ?? "" : "";
+                var pairToken = root.TryGetProperty("token", out var tokenProp) ? tokenProp.GetString() ?? "" : "";
+                if (string.IsNullOrWhiteSpace(clientId)) return;
+
+                string? newSecret = null;
+                if (!TryAuthenticateTrusted(clientId, deviceToken))
+                {
+                    if (!ConsumePairToken(pairToken)) return;
+                    newSecret = PairTrustedClient(clientId, "Bluetooth").Secret;
+                }
+
+                _bleAuthenticated = true;
+                _bleClientId = clientId;
+                MarkTrustedClient(clientId, true, "Bluetooth");
+                await _ble.SetSnapshotAsync(JsonSerializer.Serialize(Snapshot(newSecret), _json));
+                Dispatcher.Invoke(() =>
+                {
+                    HeaderStatus.Text = "Устройство подключено по Bluetooth";
+                    HeaderDot.Foreground = (Brush)FindResource("Green");
+                    RefreshTrustedDevices();
+                });
+                return;
+            }
+            await HandleRemoteMessageAsync(message, _bleClientId);
+        }
+        catch (Exception ex)
+        {
+            Dispatcher.Invoke(() => DeviceStatus.Text = $"Ошибка Bluetooth: {ex.Message}");
+        }
+    }
+
+    private async Task HandleRemoteMessageAsync(string message, string clientId)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(message);
+            var root = doc.RootElement;
+            var messageType = root.TryGetProperty("type", out var typeProp) ? typeProp.GetString() ?? "" : "";
+
+            if (messageType == "clientInfo")
+            {
+                var formFactor = root.TryGetProperty("formFactor", out var formProp) ? formProp.GetString() ?? "phone" : "phone";
+                var deviceName = root.TryGetProperty("deviceName", out var nameProp) ? nameProp.GetString() : null;
+                var label = string.Equals(formFactor, "tablet", StringComparison.OrdinalIgnoreCase) ? "Планшет" : "Телефон";
+                UpdateTrustedMetadata(clientId, formFactor, deviceName, SelectedTransport());
+                Dispatcher.Invoke(() => DeviceStatus.Text = $"{label} подключен по {SelectedTransport()}");
+                return;
+            }
+
+            if (messageType == "switchProfile" && root.TryGetProperty("profileId", out var profileIdProp))
+            {
+                var profileId = profileIdProp.GetString() ?? "";
+                var profile = _profiles.FirstOrDefault(p => p.Id == profileId);
+                if (profile is not null)
+                {
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        _state.ActiveProfileId = profile.Id;
+                        SaveState();
+                        RefreshProfiles();
+                    });
+                    await BroadcastSnapshotAsync();
+                }
+                return;
+            }
+
+            if (messageType == "switchPage" && root.TryGetProperty("pageId", out var pageIdProp))
+            {
+                var pageId = pageIdProp.GetString() ?? "";
+                if (_profile is not null && _profile.Pages.Any(p => p.Id == pageId))
+                {
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        _profile.ActivePageId = pageId;
+                        SaveState();
+                        LoadProfile();
+                    });
+                    await BroadcastSnapshotAsync();
+                }
+                return;
+            }
+
+            if (root.TryGetProperty("tileId", out var tileIdProp))
+            {
+                var tileId = tileIdProp.GetString();
+                var tile = _state.Profiles.SelectMany(p => p.Pages).SelectMany(p => p.Tiles).FirstOrDefault(t => t.Id == tileId);
+                if (tile is not null)
+                {
+                    Dispatcher.Invoke(() => DeviceStatus.Text = $"Команда получена: {tile.Title}");
+                    var executeTask = await Dispatcher.InvokeAsync(() => ExecuteTileAsync(tile));
+                    await executeTask;
+                }
+                else
+                {
+                    Dispatcher.Invoke(() => DeviceStatus.Text = $"Команда не найдена: {tileId}");
+                }
+                return;
+            }
+
+            // Backward compatibility with old APKs.
+            if (root.TryGetProperty("hotkey", out var hotkeyProp))
+            {
+                var hotkey = hotkeyProp.GetString() ?? "";
+                await Dispatcher.InvokeAsync(() => ExecuteHotkey(hotkey));
+                Dispatcher.Invoke(() => DeviceStatus.Text = $"Выполнена команда: {hotkey}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Dispatcher.Invoke(() => DeviceStatus.Text = $"Ошибка команды телефона: {ex.Message}");
+        }
+    }
+
+    private void RotatePairToken()
+    {
+        _pairToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(18)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    }
+
+    private bool ConsumePairToken(string supplied)
+    {
+        if (string.IsNullOrWhiteSpace(supplied) || string.IsNullOrWhiteSpace(_pairToken)) return false;
+        var a = Encoding.UTF8.GetBytes(supplied); var b = Encoding.UTF8.GetBytes(_pairToken);
+        var valid = a.Length == b.Length && CryptographicOperations.FixedTimeEquals(a, b);
+        if (valid) RotatePairToken();
+        return valid;
+    }
+
+    private void UpdateConnectionStatus()
+    {
+        int count;
+        lock (_clients) count = _clients.Count;
+        if (count > 0)
+        {
+            HeaderStatus.Text = count == 1 ? "Подключено 1 устройство" : $"Подключено устройств: {count}";
+            HeaderDot.Foreground = (Brush)FindResource("Green");
+            DeviceStatus.Text = count == 1 ? "Устройство подключено по Wi‑Fi" : $"Активных Wi‑Fi устройств: {count}";
+        }
+        else if (_server is not null)
+        {
+            HeaderStatus.Text = "ПК виден в локальной сети";
+            HeaderDot.Foreground = Brushes.Gold;
+            DeviceStatus.Text = "Ожидание привязанного устройства или нового QR";
+        }
+        else if (!_ble.IsRunning)
+        {
+            HeaderStatus.Text = "Связь не запущена";
+            HeaderDot.Foreground = (Brush)FindResource("Muted");
+        }
+        RefreshTrustedDevices();
+    }
+
+    private void ShowQr_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedTransport() == "Wifi")
+        {
+            if (_server is null) { MessageBox.Show(this, "Wi‑Fi связь ещё не запущена.", "MacroPad Remote"); return; }
+            ShowQr($"macropad://connect?transport=wifi&serverId={Uri.EscapeDataString(_state.ServerId)}&host={Uri.EscapeDataString(LocalIp())}&port={WebSocketPort}&token={Uri.EscapeDataString(_pairToken)}",
+                "Wi‑Fi: приложение на телефоне сначала обнаруживает этот ПК в той же сети. QR только подтверждает найденный ПК и передаёт одноразовый токен.");
+        }
+        else
+        {
+            if (!_ble.IsRunning) { MessageBox.Show(this, "Bluetooth LE ещё не запущен.", "MacroPad Remote"); return; }
+            ShowQr($"macropad://connect?transport=ble&serverId={Uri.EscapeDataString(_state.ServerId)}&service={BleGattServer.ServiceUuid:D}&token={Uri.EscapeDataString(_pairToken)}",
+                "Bluetooth LE: QR передаёт одноразовый токен авторизации, после чего телефон подключается к GATT service.");
+        }
+    }
+
+    private void ShowQr(string payload, string caption)
+    {
+        using var generator = new QRCodeGenerator();
+        using var data = generator.CreateQrCode(payload, QRCodeGenerator.ECCLevel.Q);
+        var png = new PngByteQRCode(data).GetGraphic(12);
+        var bitmap = new BitmapImage();
+        using (var stream = new MemoryStream(png))
+        {
+            bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad; bitmap.StreamSource = stream; bitmap.EndInit(); bitmap.Freeze();
+        }
+
+        var window = new Window { Owner = this, Title = "Быстрое подключение", Width = 440, Height = 525, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = (Brush)FindResource("Bg") };
+        var panel = new StackPanel { Margin = new Thickness(22) };
+        panel.Children.Add(new TextBlock { Text = "Подключить телефон", FontSize = 22, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center });
+        panel.Children.Add(new TextBlock { Text = caption, Foreground = (Brush)FindResource("Muted"), TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 14) });
+        var qrBorder = new Border { Background = Brushes.White, Padding = new Thickness(12), HorizontalAlignment = HorizontalAlignment.Center };
+        qrBorder.Child = new Image { Width = 290, Height = 290, Source = bitmap };
+        panel.Children.Add(qrBorder);
+        panel.Children.Add(new TextBlock { Text = "Отсканируйте QR в мобильном приложении MacroPad Remote", TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 14, 0, 0) });
+        window.Content = panel; window.ShowDialog();
+    }
+
+    private object Snapshot(string? deviceToken = null)
+    {
+        object? active = null;
+        if (_profile is not null && _page is not null)
+        {
+            active = new
+            {
+                id = _profile.Id,
+                name = _profile.Name,
+                icon = _profile.Icon,
+                activePageId = _page.Id,
+                pageId = _page.Id,
+                pageName = _page.Name,
+                rows = _page.Rows,
+                columns = _page.Columns,
+                pages = _profile.Pages.Select(pg => new { id = pg.Id, name = pg.Name }).ToList(),
+                tiles = _page.Tiles.Select(t => new
+                {
+                    id = t.Id,
+                    title = t.Title,
+                    actionType = t.ActionType,
+                    actionValue = t.ActionValue,
+                    hotkey = t.Hotkey,
+                    rowSpan = t.RowSpan,
+                    columnSpan = t.ColumnSpan
+                }).ToList()
+            };
+        }
+
+        return new
+        {
+            type = "profile",
+            serverId = _state.ServerId,
+            serverName = Environment.MachineName,
+            activeProfileId = _profile?.Id ?? "",
+            deviceToken,
+            profile = active,
+            profiles = _profiles.Select(p => new
+            {
+                id = p.Id,
+                name = p.Name,
+                icon = p.Icon,
+                activePageId = p.ActivePageId,
+                pages = p.Pages.Select(pg => new { id = pg.Id, name = pg.Name }).ToList()
+            }).ToList()
+        };
+    }
+
+    private async Task SendSnapshotAsync(WebSocket socket)
+    {
+        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(Snapshot(), _json));
+        await socket.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None);
+    }
+
+    private async Task BroadcastSnapshotAsync()
+    {
+        List<WebSocket> sockets;
+        lock (_clients) sockets = _clients.Where(x => x.State == WebSocketState.Open).ToList();
+        foreach (var socket in sockets) try { await SendSnapshotAsync(socket); } catch { }
+        if (_ble.IsRunning) await _ble.SetSnapshotAsync(JsonSerializer.Serialize(Snapshot(), _json));
+    }
+
+    private void SaveAndBroadcast()
+    {
+        if (_page is not null) EnsureCapacity(_page);
+        SaveState(); RebuildGrid(); _ = BroadcastSnapshotAsync();
+    }
+
+    private static (int Row, int Column)? FindSpace(bool[,] used, Tile tile, int rows, int columns)
+    {
+        var rowSpan = Math.Max(1, tile.RowSpan); var columnSpan = Math.Max(1, tile.ColumnSpan);
+        for (var row = 0; row < rows; row++)
+            for (var column = 0; column < columns; column++)
+            {
+                if (row + rowSpan > rows || column + columnSpan > columns) continue;
+                var free = true;
+                for (var y = 0; y < rowSpan && free; y++) for (var x = 0; x < columnSpan; x++) if (used[row + y, column + x]) { free = false; break; }
+                if (free) return (row, column);
+            }
+        return null;
+    }
+
+    private static void Mark(bool[,] used, int row, int column, int rowSpan, int columnSpan)
+    { for (var y = 0; y < rowSpan; y++) for (var x = 0; x < columnSpan; x++) used[row + y, column + x] = true; }
+
+    private static bool IsBlank(Tile tile) => string.IsNullOrWhiteSpace(tile.ActionType) && string.IsNullOrWhiteSpace(tile.Hotkey) && tile.Title.Equals("Добавить", StringComparison.OrdinalIgnoreCase);
+    private static int UsedArea(DeckPage page) => page.Tiles.Sum(t => Math.Max(1, t.RowSpan) * Math.Max(1, t.ColumnSpan));
+    private static int ConfiguredArea(DeckPage page) => page.Tiles.Where(t => !IsBlank(t)).Sum(t => Math.Max(1, t.RowSpan) * Math.Max(1, t.ColumnSpan));
+    private static void EnsureCapacity(DeckPage page)
+    {
+        page.Rows = Math.Clamp(page.Rows, 1, 12); page.Columns = Math.Clamp(page.Columns, 1, 12);
+        var target = page.Rows * page.Columns;
+        while (UsedArea(page) < target) page.Tiles.Add(new Tile());
+        while (UsedArea(page) > target)
+        {
+            var blank = page.Tiles.LastOrDefault(IsBlank); if (blank is null) break; page.Tiles.Remove(blank);
+        }
+    }
+
+    private static string Glyph(Tile tile) => tile.ActionType switch
+    {
+        "hotkey" => "⌨", "text" => "T", "open" => "↗", "url" => "◎", "folder" => "□", "multi" => "≡", "profile" => "⇄", "media" => "▶", _ => IsBlank(tile) ? "+" : "⌨"
+    };
+
+    private string? Prompt(string title, string initial)
+    {
+        var window = new Window { Owner = this, Title = title, Width = 390, Height = 165, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = (Brush)FindResource("Bg") };
+        var grid = new Grid { Margin = new Thickness(16) }; grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(38) }); grid.RowDefinitions.Add(new RowDefinition());
+        var box = new TextBox { Text = initial, Height = 34 }; grid.Children.Add(box);
+        var panel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom };
+        var cancel = new Button { Content = "Отмена", Width = 85, Margin = new Thickness(0, 0, 7, 0) }; cancel.Click += (_, _) => window.Close();
+        var ok = new Button { Content = "OK", Width = 85 }; ok.Click += (_, _) => window.DialogResult = true;
+        panel.Children.Add(cancel); panel.Children.Add(ok); Grid.SetRow(panel, 1); grid.Children.Add(panel); window.Content = grid; box.SelectAll(); box.Focus();
+        return window.ShowDialog() == true ? box.Text.Trim() : null;
+    }
+
+    private static string LocalIp()
+    {
+        try
+        {
+            var candidates = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(n => n.OperationalStatus == OperationalStatus.Up)
+                .Where(n => n.NetworkInterfaceType is not NetworkInterfaceType.Loopback and not NetworkInterfaceType.Tunnel)
+                .SelectMany(n =>
+                {
+                    IPInterfaceProperties properties;
+                    try { properties = n.GetIPProperties(); }
+                    catch { return Array.Empty<(NetworkInterface Nic, IPAddress Address, bool HasGateway, int Score)>(); }
+
+                    var hasGateway = properties.GatewayAddresses.Any(g =>
+                        g.Address.AddressFamily == AddressFamily.InterNetwork &&
+                        !g.Address.Equals(IPAddress.Any) && !g.Address.Equals(IPAddress.None));
+                    var virtualName = $"{n.Name} {n.Description}".ToLowerInvariant();
+                    var isVirtual = virtualName.Contains("virtual") || virtualName.Contains("hyper-v") ||
+                                    virtualName.Contains("vmware") || virtualName.Contains("virtualbox") ||
+                                    virtualName.Contains("wsl") || virtualName.Contains("docker") ||
+                                    virtualName.Contains("tailscale") || virtualName.Contains("zerotier");
+                    var isPhysicalPreferred = n.NetworkInterfaceType is NetworkInterfaceType.Wireless80211 or NetworkInterfaceType.Ethernet or NetworkInterfaceType.GigabitEthernet;
+
+                    return properties.UnicastAddresses
+                        .Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(a.Address))
+                        .Select(a =>
+                        {
+                            var score = (hasGateway ? 100 : 0) + (isPhysicalPreferred ? 40 : 0) - (isVirtual ? 200 : 0) + (IsPrivateIpv4(a.Address) ? 20 : 0);
+                            return (Nic: n, Address: a.Address, HasGateway: hasGateway, Score: score);
+                        });
+                })
+                .OrderByDescending(x => x.Score)
+                .ToList();
+
+            return candidates.FirstOrDefault().Address?.ToString() ?? "127.0.0.1";
+        }
+        catch
+        {
+            return "127.0.0.1";
+        }
+    }
+
+    private static bool IsPrivateIpv4(IPAddress address)
+    {
+        var b = address.GetAddressBytes();
+        return b.Length == 4 &&
+               (b[0] == 10 ||
+                (b[0] == 172 && b[1] is >= 16 and <= 31) ||
+                (b[0] == 192 && b[1] == 168));
+    }
+
+    protected override async void OnClosed(EventArgs e)
+    {
+        SaveState();
+        await StopAllTransportsAsync();
+        await _lanDiscovery.DisposeAsync();
+        await _ble.DisposeAsync();
+        base.OnClosed(e);
+    }
+
+    #region Windows input
+    private const uint INPUT_MOUSE = 0;
+    private const uint INPUT_KEYBOARD = 1;
+    private const uint INPUT_HARDWARE = 2;
+    private const uint KEYEVENTF_KEYUP = 0x0002;
+    private const uint KEYEVENTF_UNICODE = 0x0004;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct INPUT
+    {
+        public uint type;
+        public InputUnion U;
+    }
+
+    // The native INPUT union must include its largest member. On x64 MOUSEINPUT
+    // makes INPUT 40 bytes. A keyboard-only union becomes 32 bytes and causes
+    // SendInput to fail with ERROR_INVALID_PARAMETER.
+    [StructLayout(LayoutKind.Explicit)]
+    private struct InputUnion
+    {
+        [FieldOffset(0)] public MOUSEINPUT mi;
+        [FieldOffset(0)] public KEYBDINPUT ki;
+        [FieldOffset(0)] public HARDWAREINPUT hi;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MOUSEINPUT
+    {
+        public int dx;
+        public int dy;
+        public uint mouseData;
+        public uint dwFlags;
+        public uint time;
+        public UIntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KEYBDINPUT
+    {
+        public ushort wVk;
+        public ushort wScan;
+        public uint dwFlags;
+        public uint time;
+        public UIntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct HARDWAREINPUT
+    {
+        public uint uMsg;
+        public ushort wParamL;
+        public ushort wParamH;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+    private static void SendInputs(IReadOnlyCollection<INPUT> inputs)
+    {
+        if (inputs.Count == 0) return;
+        var buffer = inputs.ToArray();
+        var sent = SendInput((uint)buffer.Length, buffer, Marshal.SizeOf<INPUT>());
+        if (sent != buffer.Length)
+        {
+            var error = Marshal.GetLastWin32Error();
+            throw new Win32Exception(error, $"SendInput отправил {sent} из {buffer.Length} событий (INPUT={Marshal.SizeOf<INPUT>()} байт)");
+        }
+    }
+
+    private static void ExecuteHotkey(string hotkey)
+    {
+        if (string.IsNullOrWhiteSpace(hotkey)) return;
+        var tokens = hotkey.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var keys = new List<ushort>();
+        foreach (var token in tokens)
+        {
+            var vk = TokenToVk(token);
+            if (vk != 0) keys.Add(vk);
+        }
+        if (keys.Count == 0)
+            throw new InvalidOperationException($"Не удалось распознать сочетание «{hotkey}».");
+
+        var inputs = new List<INPUT>();
+        foreach (var vk in keys) inputs.Add(KeyInput(vk, false));
+        for (var i = keys.Count - 1; i >= 0; i--) inputs.Add(KeyInput(keys[i], true));
+        SendInputs(inputs);
+    }
+
+    private static INPUT KeyInput(ushort vk, bool up) => new()
+    {
+        type = INPUT_KEYBOARD,
+        U = new InputUnion { ki = new KEYBDINPUT { wVk = vk, dwFlags = up ? KEYEVENTF_KEYUP : 0 } }
+    };
+
+    private static ushort TokenToVk(string token)
+    {
+        token = token.Trim().ToUpperInvariant();
+        if (token.Length == 1)
+        {
+            var c = token[0];
+            if (c is >= 'A' and <= 'Z') return c;
+            if (c is >= '0' and <= '9') return c;
+        }
+        if (token.StartsWith('F') && int.TryParse(token[1..], out var f) && f is >= 1 and <= 24) return (ushort)(0x70 + f - 1);
+        if (token.StartsWith("NUM") && int.TryParse(token[3..], out var n) && n is >= 0 and <= 9) return (ushort)(0x60 + n);
+        return token switch
+        {
+            "CTRL" or "CONTROL" => 0x11, "ALT" => 0x12, "SHIFT" => 0x10, "WIN" or "WINDOWS" => 0x5B,
+            "TAB" => 0x09, "ENTER" or "RETURN" => 0x0D, "ESC" or "ESCAPE" => 0x1B, "SPACE" => 0x20,
+            "BACKSPACE" => 0x08, "DELETE" => 0x2E, "INSERT" => 0x2D, "HOME" => 0x24, "END" => 0x23,
+            "LEFT" => 0x25, "UP" => 0x26, "RIGHT" => 0x27, "DOWN" => 0x28, "PAGEUP" => 0x21, "PAGEDOWN" => 0x22,
+            "PLUS" or "+" => 0xBB, "MINUS" or "-" => 0xBD, "COMMA" => 0xBC, "PERIOD" or "DOT" => 0xBE,
+            "MEDIA_PLAY" or "MEDIA_PLAY_PAUSE" => 0xB3, "MEDIA_NEXT" => 0xB0, "MEDIA_PREV" => 0xB1,
+            "VOLUME_MUTE" => 0xAD, "VOLUME_DOWN" => 0xAE, "VOLUME_UP" => 0xAF,
+            _ => 0
+        };
+    }
+
+    private static void SendText(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        var inputs = new List<INPUT>();
+        foreach (var ch in text)
+        {
+            inputs.Add(new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wScan = ch, dwFlags = KEYEVENTF_UNICODE } } });
+            inputs.Add(new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wScan = ch, dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP } } });
+        }
+        SendInputs(inputs);
+    }
+    #endregion
 }
 
-public sealed class AppState{public string ActiveProfileId{get;set;}="";public string Transport{get;set;}="Wifi";public List<Profile> Profiles{get;set;}=new();}
-public sealed class Profile{public string Id{get;set;}=Guid.NewGuid().ToString("N");public string Name{get;set;}="Profile";public string Icon{get;set;}="■";public string Description{get;set;}="";public string ActivePageId{get;set;}="";public List<DeckPage> Pages{get;set;}=new();}
-public sealed class DeckPage{public string Id{get;set;}=Guid.NewGuid().ToString("N");public string Name{get;set;}="Страница";public int Rows{get;set;}=3;public int Columns{get;set;}=4;public double Zoom{get;set;}=1;public List<Tile> Tiles{get;set;}=new();}
-public sealed class Tile{public string Id{get;set;}=Guid.NewGuid().ToString("N");public string Title{get;set;}="Добавить";public string Hotkey{get;set;}="";public int RowSpan{get;set;}=1;public int ColumnSpan{get;set;}=1;}
-public sealed record ActionItem(string Title,string Hotkey){public override string ToString()=>string.IsNullOrWhiteSpace(Hotkey)?Title:$"{Title} — {Hotkey}";}
+public sealed class AppState
+{
+    public string ServerId { get; set; } = Guid.NewGuid().ToString("N");
+    public string ActiveProfileId { get; set; } = "";
+    public string Transport { get; set; } = "Wifi";
+    public List<Profile> Profiles { get; set; } = new();
+    public List<TrustedClient> TrustedDevices { get; set; } = new();
+}
+
+public sealed class Profile
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = "Profile";
+    public string Icon { get; set; } = "•";
+    public string Description { get; set; } = "";
+    public string ActivePageId { get; set; } = "";
+    public List<DeckPage> Pages { get; set; } = new();
+}
+
+public sealed class DeckPage
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = "Page";
+    public int Rows { get; set; } = 3;
+    public int Columns { get; set; } = 4;
+    public double Zoom { get; set; } = 1;
+    public List<Tile> Tiles { get; set; } = new();
+}
+
+public sealed class Tile
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Title { get; set; } = "Добавить";
+    public string ActionType { get; set; } = "";
+    public string ActionValue { get; set; } = "";
+    public string Hotkey { get; set; } = "";
+    public int RowSpan { get; set; } = 1;
+    public int ColumnSpan { get; set; } = 1;
+    public List<ActionStep> Steps { get; set; } = new();
+}
+
+public sealed class ActionStep
+{
+    public string Type { get; set; } = "hotkey";
+    public string Value { get; set; } = "";
+    public int DelayMs { get; set; } = 100;
+}
+
+public sealed record ActionItem(string Category, string Icon, string Title, string Description, string Type, string Value);
+
+
+public sealed class TrustedClient
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "Телефон";
+    public string FormFactor { get; set; } = "phone";
+    public string Secret { get; set; } = "";
+    public string Transport { get; set; } = "Wi‑Fi";
+    public DateTime LastSeenUtc { get; set; } = DateTime.UtcNow;
+
+    [JsonIgnore] public bool IsOnline { get; set; }
+    [JsonIgnore] public string DeviceGlyph => FormFactor == "tablet" ? "▭" : "▯";
+    [JsonIgnore] public string Details
+        => $"{(IsOnline ? "● Онлайн" : "○ Офлайн")} • {Transport} • {LastSeenUtc.ToLocalTime():dd.MM HH:mm}";
+}

@@ -1,42 +1,278 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:universal_ble/universal_ble.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+
+const serviceUuid = '9b4981a0-7d70-4b1a-9df2-7997634c5001';
+const commandUuid = '9b4981a0-7d70-4b1a-9df2-7997634c5002';
+const stateUuid = '9b4981a0-7d70-4b1a-9df2-7997634c5003';
+const discoveryPort = 8766;
+const discoveryProbe = 'MACROPAD_DISCOVER_V1';
+
+const mpBg = Color(0xff17191b);
+const mpPanel = Color(0xff1d1f21);
+const mpPanel2 = Color(0xff24272a);
+const mpHover = Color(0xff2c3034);
+const mpBorder = Color(0xff353a3e);
+const mpText = Color(0xfff2f2f2);
+const mpMuted = Color(0xff9da3a8);
+const mpBlue = Color(0xff1688ff);
+const mpGreen = Color(0xff62d16f);
 
 void main() => runApp(const MacroPadApp());
 
-class MacroPadApp extends StatelessWidget {
-  const MacroPadApp({super.key});
+enum ClientFormFactor { phone, tablet }
+enum TransportKind { wifi, bluetooth }
+
+ClientFormFactor formFactorOf(BuildContext context) {
+  final view = View.maybeOf(context);
+  if (view != null) {
+    final display = view.display;
+    final width = display.size.width / display.devicePixelRatio;
+    final height = display.size.height / display.devicePixelRatio;
+    return (width < height ? width : height) >= 600 ? ClientFormFactor.tablet : ClientFormFactor.phone;
+  }
+  return MediaQuery.sizeOf(context).shortestSide >= 600 ? ClientFormFactor.tablet : ClientFormFactor.phone;
+}
+
+String formFactorLabel(ClientFormFactor value) => value == ClientFormFactor.tablet ? 'Планшет' : 'Телефон';
+
+Future<void> toggleScreenOrientation(BuildContext context) async {
+  final orientation = MediaQuery.orientationOf(context);
+  if (orientation == Orientation.portrait) {
+    await SystemChrome.setPreferredOrientations(const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+  } else {
+    await SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp]);
+  }
+}
+
+class MacroPadMark extends StatelessWidget {
+  final double size;
+  const MacroPadMark({super.key, this.size = 28});
+
   @override
   Widget build(BuildContext context) {
-    final scheme = const ColorScheme.dark(
-      primary: Colors.white,
-      onPrimary: Colors.black,
-      surface: Color(0xff1d1f21),
-      onSurface: Colors.white,
-      secondary: Color(0xff1688ff),
+    final gap = size * .08;
+    final cell = (size - gap) / 2;
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Stack(
+        children: [
+          Positioned(left: 0, top: 0, width: cell, height: cell, child: Container(color: mpBlue)),
+          Positioned(right: 0, top: 0, width: cell, height: cell, child: Container(color: mpText)),
+          Positioned(left: 0, bottom: 0, width: cell, height: cell, child: Container(color: mpText)),
+          Positioned(right: 0, bottom: 0, width: cell, height: cell, child: Container(color: mpPanel2, foregroundDecoration: BoxDecoration(border: Border.all(color: mpText, width: 1.2)))),
+        ],
+      ),
     );
+  }
+}
+
+class MacroPadApp extends StatelessWidget {
+  const MacroPadApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final square = RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: const BorderSide(color: mpBorder));
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'MacroPad Remote',
-      theme: ThemeData.dark(useMaterial3: true).copyWith(
-        colorScheme: scheme,
-        scaffoldBackgroundColor: const Color(0xff17191b),
-        appBarTheme: const AppBarTheme(backgroundColor: Color(0xff17191b)),
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        useMaterial3: true,
+        scaffoldBackgroundColor: mpBg,
+        colorScheme: const ColorScheme.dark(
+          primary: mpBlue,
+          onPrimary: Colors.white,
+          surface: mpPanel,
+          onSurface: mpText,
+          secondary: mpBlue,
+          onSecondary: Colors.white,
+          outline: mpBorder,
+        ),
+        appBarTheme: const AppBarTheme(backgroundColor: Color(0xff1b1d1f), foregroundColor: Colors.white, surfaceTintColor: Colors.transparent, elevation: 0),
+        drawerTheme: const DrawerThemeData(backgroundColor: mpPanel, shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero)),
+        textTheme: ThemeData.dark().textTheme.apply(bodyColor: mpText, displayColor: mpText),
+        dividerColor: mpBorder,
         inputDecorationTheme: const InputDecorationTheme(
           filled: true,
           fillColor: Color(0xff111315),
-          border: OutlineInputBorder(borderRadius: BorderRadius.zero),
-          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.zero, borderSide: BorderSide(color: Color(0xff353a3e))),
-          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.zero, borderSide: BorderSide(color: Colors.white)),
+          labelStyle: TextStyle(color: mpMuted),
+          hintStyle: TextStyle(color: mpMuted),
+          border: OutlineInputBorder(borderRadius: BorderRadius.zero, borderSide: BorderSide(color: mpBorder)),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.zero, borderSide: BorderSide(color: mpBorder)),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.zero, borderSide: BorderSide(color: mpBlue)),
         ),
-        filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero))),
-        outlinedButtonTheme: OutlinedButtonThemeData(style: OutlinedButton.styleFrom(shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero))),
-        cardTheme: const CardThemeData(shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero), color: Color(0xff202326)),
+        filledButtonTheme: FilledButtonThemeData(
+          style: ButtonStyle(
+            backgroundColor: WidgetStateProperty.resolveWith((states) => states.contains(WidgetState.pressed) ? mpHover : mpPanel2),
+            foregroundColor: const WidgetStatePropertyAll(Colors.white),
+            overlayColor: const WidgetStatePropertyAll(mpHover),
+            shape: WidgetStatePropertyAll(square),
+          ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: ButtonStyle(
+            backgroundColor: const WidgetStatePropertyAll(mpPanel),
+            foregroundColor: const WidgetStatePropertyAll(Colors.white),
+            side: const WidgetStatePropertyAll(BorderSide(color: mpBorder)),
+            overlayColor: const WidgetStatePropertyAll(mpHover),
+            shape: WidgetStatePropertyAll(square),
+          ),
+        ),
+        cardTheme: const CardThemeData(color: mpPanel2, surfaceTintColor: Colors.transparent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: BorderSide(color: mpBorder))),
+        snackBarTheme: const SnackBarThemeData(backgroundColor: mpPanel2, contentTextStyle: TextStyle(color: Colors.white), shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero), behavior: SnackBarBehavior.floating),
+        dialogTheme: const DialogThemeData(backgroundColor: mpPanel, shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: BorderSide(color: mpBorder))),
+        progressIndicatorTheme: const ProgressIndicatorThemeData(color: mpBlue),
+        tooltipTheme: const TooltipThemeData(decoration: BoxDecoration(color: mpPanel2, border: Border.fromBorderSide(BorderSide(color: mpBorder))), textStyle: TextStyle(color: Colors.white)),
       ),
       home: const ConnectPage(),
     );
+  }
+}
+
+class DiscoveredPc {
+  final String name;
+  final String serverId;
+  final String host;
+  final int port;
+  final DateTime seenAt;
+
+  DiscoveredPc({required this.name, required this.serverId, required this.host, required this.port, DateTime? seenAt}) : seenAt = seenAt ?? DateTime.now();
+
+  factory DiscoveredPc.fromJson(Map<String, dynamic> json, {String? networkHost}) => DiscoveredPc(
+        name: '${json['name'] ?? 'MacroPad PC'}',
+        serverId: '${json['serverId'] ?? ''}',
+        host: networkHost?.isNotEmpty == true ? networkHost! : '${json['host'] ?? ''}',
+        port: (json['port'] as num?)?.toInt() ?? 8765,
+      );
+}
+
+class QrPairing {
+  final TransportKind transport;
+  final String serverId;
+  final String token;
+  final String? host;
+  final int port;
+  final String? service;
+
+  const QrPairing({required this.transport, required this.serverId, required this.token, this.host, this.port = 8765, this.service});
+
+  static QrPairing? parse(String raw) {
+    try {
+      final uri = Uri.parse(raw);
+      if (uri.scheme != 'macropad' || uri.host != 'connect') return null;
+      final token = uri.queryParameters['token'] ?? '';
+      if (token.isEmpty) return null;
+      return QrPairing(
+        transport: uri.queryParameters['transport'] == 'ble' ? TransportKind.bluetooth : TransportKind.wifi,
+        serverId: uri.queryParameters['serverId'] ?? '',
+        token: token,
+        host: uri.queryParameters['host'],
+        port: int.tryParse(uri.queryParameters['port'] ?? '') ?? 8765,
+        service: uri.queryParameters['service'],
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+class SavedPc {
+  final String serverId;
+  final String name;
+  final String host;
+  final int port;
+  final String deviceToken;
+  final String transport;
+  final String? bleDeviceId;
+  final DateTime lastSeen;
+
+  const SavedPc({required this.serverId, required this.name, required this.host, required this.port, required this.deviceToken, required this.transport, this.bleDeviceId, required this.lastSeen});
+
+  SavedPc copyWith({String? name, String? host, int? port, String? deviceToken, String? transport, String? bleDeviceId, DateTime? lastSeen}) => SavedPc(
+        serverId: serverId,
+        name: name ?? this.name,
+        host: host ?? this.host,
+        port: port ?? this.port,
+        deviceToken: deviceToken ?? this.deviceToken,
+        transport: transport ?? this.transport,
+        bleDeviceId: bleDeviceId ?? this.bleDeviceId,
+        lastSeen: lastSeen ?? this.lastSeen,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'serverId': serverId,
+        'name': name,
+        'host': host,
+        'port': port,
+        'deviceToken': deviceToken,
+        'transport': transport,
+        'bleDeviceId': bleDeviceId,
+        'lastSeen': lastSeen.toIso8601String(),
+      };
+
+  factory SavedPc.fromJson(Map<String, dynamic> json) => SavedPc(
+        serverId: '${json['serverId'] ?? ''}',
+        name: '${json['name'] ?? 'MacroPad PC'}',
+        host: '${json['host'] ?? ''}',
+        port: (json['port'] as num?)?.toInt() ?? 8765,
+        deviceToken: '${json['deviceToken'] ?? ''}',
+        transport: '${json['transport'] ?? 'wifi'}',
+        bleDeviceId: json['bleDeviceId']?.toString(),
+        lastSeen: DateTime.tryParse('${json['lastSeen'] ?? ''}') ?? DateTime.now(),
+      );
+}
+
+class DeviceStore {
+  static const FlutterSecureStorage _storage = FlutterSecureStorage();
+  static const _clientKey = 'macropad_client_id_v1';
+  static const _pcsKey = 'macropad_saved_pcs_v1';
+
+  static Future<String> clientId() async {
+    final existing = await _storage.read(key: _clientKey);
+    if (existing != null && existing.isNotEmpty) return existing;
+    final random = '${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}-${Platform.operatingSystem}-${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
+    final id = base64Url.encode(utf8.encode(random)).replaceAll('=', '');
+    await _storage.write(key: _clientKey, value: id);
+    return id;
+  }
+
+  static Future<Map<String, SavedPc>> load() async {
+    try {
+      final raw = await _storage.read(key: _pcsKey);
+      if (raw == null || raw.isEmpty) return {};
+      final list = jsonDecode(raw) as List;
+      final map = <String, SavedPc>{};
+      for (final item in list) {
+        final pc = SavedPc.fromJson(Map<String, dynamic>.from(item as Map));
+        if (pc.serverId.isNotEmpty && pc.deviceToken.isNotEmpty) map[pc.serverId] = pc;
+      }
+      return map;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static Future<void> saveAll(Map<String, SavedPc> pcs) => _storage.write(key: _pcsKey, value: jsonEncode(pcs.values.map((e) => e.toJson()).toList()));
+
+  static Future<void> upsert(SavedPc pc) async {
+    final all = await load();
+    all[pc.serverId] = pc;
+    await saveAll(all);
+  }
+
+  static Future<void> remove(String serverId) async {
+    final all = await load();
+    all.remove(serverId);
+    await saveAll(all);
   }
 }
 
@@ -47,82 +283,389 @@ class ConnectPage extends StatefulWidget {
 }
 
 class _ConnectPageState extends State<ConnectPage> {
-  final host = TextEditingController(text: '192.168.1.100');
-  final port = TextEditingController(text: '8765');
-  final code = TextEditingController();
-  String transport = 'wifi';
+  TransportKind transport = TransportKind.wifi;
+  final Map<String, DiscoveredPc> pcs = {};
+  final Map<String, BleDevice> bleDevices = {};
+  Map<String, SavedPc> savedPcs = {};
+  RawDatagramSocket? udp;
+  Timer? probeTimer;
+  StreamSubscription<BleDevice>? bleScanSub;
+  String status = 'Подготовка…';
+  bool scanningBle = false;
+  String clientId = '';
 
-  Future<void> scanQr() async {
-    final value = await Navigator.push<String>(context, MaterialPageRoute(builder: (_) => const QrScannerPage()));
-    if (value == null) return;
-    try {
-      final uri = Uri.parse(value);
-      if (uri.scheme != 'macropad' || uri.host != 'connect') throw const FormatException('wrong scheme');
-      final h = uri.queryParameters['host'];
-      final p = uri.queryParameters['port'];
-      final t = uri.queryParameters['token'];
-      if (h == null || p == null || t == null) throw const FormatException('missing fields');
-      setState(() {
-        transport = 'wifi';
-        host.text = h;
-        port.text = p;
-        code.text = t;
-      });
-    } catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('QR-код не относится к MacroPad Remote')));
-    }
+  @override
+  void initState() {
+    super.initState();
+    _initialize();
   }
 
-  void connect() {
-    if (transport != 'wifi') {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bluetooth будет подключён в следующей preview-сборке')));
-      return;
-    }
-    final h = host.text.trim();
-    final p = int.tryParse(port.text.trim()) ?? 8765;
-    final token = code.text.trim();
-    if (h.isEmpty || token.isEmpty) return;
-    Navigator.push(context, MaterialPageRoute(builder: (_) => RemotePage(url: 'ws://$h:$p/ws?token=$token')));
+  Future<void> _initialize() async {
+    clientId = await DeviceStore.clientId();
+    savedPcs = await DeviceStore.load();
+    if (mounted) setState(() {});
+    await _startLanDiscovery();
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('MacroPad Remote')),
-        body: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(22),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                const Icon(Icons.grid_view_rounded, size: 64),
-                const SizedBox(height: 18),
-                const Text('Подключение к ПК', style: TextStyle(fontSize: 25, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 18),
-                SegmentedButton<String>(
+  void dispose() {
+    probeTimer?.cancel();
+    udp?.close();
+    bleScanSub?.cancel();
+    UniversalBle.stopScan();
+    super.dispose();
+  }
+
+  Future<void> _reloadSaved() async {
+    savedPcs = await DeviceStore.load();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _startLanDiscovery() async {
+    await _stopBleScan();
+    udp?.close();
+    probeTimer?.cancel();
+    pcs.clear();
+    try {
+      final socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      socket.broadcastEnabled = true;
+      udp = socket;
+      socket.listen((event) {
+        if (event != RawSocketEvent.read) return;
+        final datagram = socket.receive();
+        if (datagram == null) return;
+        try {
+          final json = jsonDecode(utf8.decode(datagram.data));
+          if (json is! Map<String, dynamic> || json['type'] != 'macropad_discovery') return;
+          final pc = DiscoveredPc.fromJson(json, networkHost: datagram.address.address);
+          if (pc.serverId.isEmpty) return;
+          final oldSaved = savedPcs[pc.serverId];
+          if (oldSaved != null && (oldSaved.host != pc.host || oldSaved.port != pc.port)) {
+            final updated = oldSaved.copyWith(host: pc.host, port: pc.port, lastSeen: DateTime.now());
+            savedPcs[pc.serverId] = updated;
+            DeviceStore.upsert(updated);
+          }
+          if (!mounted) return;
+          setState(() {
+            pcs[pc.serverId] = pc;
+            status = pcs.length == 1 ? 'Найден 1 компьютер' : 'Найдено компьютеров: ${pcs.length}';
+          });
+        } catch (_) {}
+      });
+      void probe() => socket.send(utf8.encode(discoveryProbe), InternetAddress('255.255.255.255'), discoveryPort);
+      probe();
+      probeTimer = Timer.periodic(const Duration(seconds: 2), (_) => probe());
+      if (mounted) setState(() => status = 'Поиск MacroPad Remote в этой Wi‑Fi сети…');
+    } catch (e) {
+      if (mounted) setState(() => status = 'Не удалось запустить сетевой поиск: $e');
+    }
+  }
+
+  Future<void> _startBleScan() async {
+    udp?.close();
+    udp = null;
+    probeTimer?.cancel();
+    pcs.clear();
+    await UniversalBle.requestPermissions();
+    await bleScanSub?.cancel();
+    bleDevices.clear();
+    bleScanSub = UniversalBle.scanStream.listen((device) {
+      if (!mounted) return;
+      setState(() {
+        bleDevices[device.deviceId] = device;
+        status = 'Найдено Bluetooth-устройств: ${bleDevices.length}';
+      });
+    });
+    scanningBle = true;
+    await UniversalBle.startScan(scanFilter: ScanFilter(withServices: [serviceUuid]));
+    if (mounted) setState(() => status = 'Поиск MacroPad Remote по Bluetooth LE…');
+  }
+
+  Future<void> _stopBleScan() async {
+    if (!scanningBle) return;
+    scanningBle = false;
+    try { await UniversalBle.stopScan(); } catch (_) {}
+    await bleScanSub?.cancel();
+    bleScanSub = null;
+  }
+
+  Future<void> _switchTransport(TransportKind value) async {
+    if (value == transport) return;
+    setState(() {
+      transport = value;
+      status = value == TransportKind.wifi ? 'Поиск компьютеров в сети…' : 'Поиск Bluetooth…';
+    });
+    if (value == TransportKind.wifi) {
+      await _startLanDiscovery();
+    } else {
+      await _startBleScan();
+    }
+  }
+
+  Future<void> _showSettings() async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Row(children: [Icon(Icons.settings), SizedBox(width: 9), Text('Настройки')]),
+        content: StatefulBuilder(
+          builder: (context, setLocal) => SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Способ подключения', style: TextStyle(color: mpMuted, fontSize: 11)),
+                const SizedBox(height: 7),
+                SegmentedButton<TransportKind>(
                   segments: const [
-                    ButtonSegment(value: 'wifi', label: Text('Wi‑Fi'), icon: Icon(Icons.wifi)),
-                    ButtonSegment(value: 'bluetooth', label: Text('Bluetooth'), icon: Icon(Icons.bluetooth)),
+                    ButtonSegment(value: TransportKind.wifi, icon: Icon(Icons.wifi), label: Text('Wi‑Fi')),
+                    ButtonSegment(value: TransportKind.bluetooth, icon: Icon(Icons.bluetooth), label: Text('Bluetooth')),
                   ],
                   selected: {transport},
-                  onSelectionChanged: (value) => setState(() => transport = value.first),
-                  style: const ButtonStyle(shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.zero))),
+                  onSelectionChanged: (values) async {
+                    final next = values.first;
+                    setLocal(() {});
+                    Navigator.of(dialogContext).pop();
+                    await _switchTransport(next);
+                  },
+                  style: ButtonStyle(
+                    backgroundColor: WidgetStateProperty.resolveWith((states) => states.contains(WidgetState.selected) ? mpHover : mpPanel),
+                    foregroundColor: const WidgetStatePropertyAll(Colors.white),
+                    side: const WidgetStatePropertyAll(BorderSide(color: mpBorder)),
+                    shape: const WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.zero)),
+                  ),
                 ),
-                const SizedBox(height: 14),
-                TextField(controller: host, enabled: transport == 'wifi', decoration: const InputDecoration(labelText: 'IP компьютера')),
                 const SizedBox(height: 10),
-                TextField(controller: port, enabled: transport == 'wifi', keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Порт')),
-                const SizedBox(height: 10),
-                TextField(controller: code, enabled: transport == 'wifi', keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Код подключения')),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(onPressed: transport == 'wifi' ? scanQr : null, icon: const Icon(Icons.qr_code_scanner), label: const Padding(padding: EdgeInsets.all(13), child: Text('Сканировать QR-код'))),
-                const SizedBox(height: 10),
-                FilledButton(onPressed: connect, child: const Padding(padding: EdgeInsets.all(14), child: Text('Подключиться'))),
-                if (transport == 'bluetooth') const Padding(padding: EdgeInsets.only(top: 12), child: Text('Bluetooth выбран. BLE-транспорт будет активирован следующим этапом.', style: TextStyle(color: Colors.grey))),
-              ]),
+                Text(transport == TransportKind.wifi
+                    ? 'Устройства в одной сети обнаруживаются автоматически. QR нужен только при первой привязке.'
+                    : 'Bluetooth LE можно использовать для прямого соединения без общей Wi‑Fi сети.', style: const TextStyle(color: mpMuted)),
+              ],
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Future<QrPairing?> _scanQr() => Navigator.of(context).push<QrPairing>(MaterialPageRoute(builder: (_) => const QrScannerPage()));
+
+  Future<void> _pairWifi(DiscoveredPc pc) async {
+    final qr = await _scanQr();
+    if (!mounted || qr == null) return;
+    if (qr.transport != TransportKind.wifi) return _message('Этот QR-код предназначен для Bluetooth.');
+    if (qr.serverId.isNotEmpty && qr.serverId != pc.serverId) return _message('QR-код относится к другому компьютеру.');
+    final remote = WifiRemoteTransport(host: pc.host, port: pc.port, clientId: clientId, pairToken: qr.token);
+    await _openRemote(remote, serverId: pc.serverId, serverName: pc.name, host: pc.host, port: pc.port, transportName: 'wifi');
+  }
+
+  Future<void> _pairBle(BleDevice device) async {
+    final qr = await _scanQr();
+    if (!mounted || qr == null) return;
+    if (qr.transport != TransportKind.bluetooth) return _message('Этот QR-код предназначен для Wi‑Fi.');
+    await _stopBleScan();
+    final remote = BleRemoteTransport(device: device, clientId: clientId, pairToken: qr.token);
+    await _openRemote(remote, serverId: qr.serverId, serverName: device.name ?? 'MacroPad Remote', host: '', port: 0, transportName: 'ble', bleDeviceId: device.deviceId);
+    if (mounted && transport == TransportKind.bluetooth) await _startBleScan();
+  }
+
+  Future<void> _connectSaved(SavedPc saved) async {
+    if (saved.transport == 'ble') {
+      final deviceId = saved.bleDeviceId;
+      if (deviceId == null || !bleDevices.containsKey(deviceId)) {
+        if (transport != TransportKind.bluetooth) await _switchTransport(TransportKind.bluetooth);
+        return _message('Привязанный Bluetooth ПК пока не найден. Дождитесь появления устройства в списке.');
+      }
+      final device = bleDevices[deviceId]!;
+      final remote = BleRemoteTransport(device: device, clientId: clientId, deviceToken: saved.deviceToken);
+      await _openRemote(remote, serverId: saved.serverId, serverName: saved.name, host: saved.host, port: saved.port, transportName: 'ble', bleDeviceId: deviceId);
+      return;
+    }
+
+    final discovered = pcs[saved.serverId];
+    final host = discovered?.host ?? saved.host;
+    final port = discovered?.port ?? saved.port;
+    if (host.isEmpty) return _message('Привязанный ПК сейчас не найден в локальной сети.');
+    final remote = WifiRemoteTransport(host: host, port: port, clientId: clientId, deviceToken: saved.deviceToken);
+    await _openRemote(remote, serverId: saved.serverId, serverName: discovered?.name ?? saved.name, host: host, port: port, transportName: 'wifi');
+  }
+
+  Future<void> _openRemote(RemoteTransport remote, {required String serverId, required String serverName, required String host, required int port, required String transportName, String? bleDeviceId}) async {
+    try {
+      final switchTo = await Navigator.of(context).push<String>(
+        MaterialPageRoute(
+          builder: (_) => RemotePage(
+            transport: remote,
+            formFactor: formFactorOf(context),
+            clientId: clientId,
+            initialServerId: serverId,
+            initialServerName: serverName,
+            host: host,
+            port: port,
+            transportName: transportName,
+            bleDeviceId: bleDeviceId,
+            savedDevices: savedPcs.values.toList(),
+            onPaired: (pc) async {
+              await DeviceStore.upsert(pc);
+              savedPcs[pc.serverId] = pc;
+            },
+          ),
+        ),
       );
+      await _reloadSaved();
+      if (switchTo != null && mounted) {
+        final target = savedPcs[switchTo];
+        if (target != null) await _connectSaved(target);
+      }
+    } catch (e) {
+      if (mounted) _message('Не удалось подключиться: $e');
+    }
+  }
+
+  void _message(String text) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+
+  @override
+  Widget build(BuildContext context) {
+    final formFactor = formFactorOf(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Row(mainAxisSize: MainAxisSize.min, children: [MacroPadMark(size: 24), SizedBox(width: 10), Text('MacroPad Remote')]),
+        actions: [
+          Center(child: Text(formFactorLabel(formFactor), style: const TextStyle(fontSize: 11, color: mpMuted))),
+          const SizedBox(width: 5),
+          IconButton(tooltip: 'Повернуть экран', onPressed: () => toggleScreenOrientation(context), icon: const Icon(Icons.screen_rotation)),
+          IconButton(tooltip: 'Настройки', onPressed: _showSettings, icon: const Icon(Icons.settings)),
+          const SizedBox(width: 3),
+        ],
+      ),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(children: [
+                    Expanded(child: Text(status, style: const TextStyle(color: mpMuted))),
+                    IconButton(tooltip: 'Обновить поиск', onPressed: transport == TransportKind.wifi ? _startLanDiscovery : _startBleScan, icon: const Icon(Icons.refresh)),
+                  ]),
+                  if (savedPcs.isNotEmpty) ...[
+                    const Text('Привязанные устройства', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 7),
+                    SizedBox(height: 92, child: _savedDevicesStrip()),
+                    const SizedBox(height: 12),
+                  ],
+                  Text(transport == TransportKind.wifi ? 'Компьютеры в этой сети' : 'Bluetooth устройства', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 7),
+                  Expanded(child: transport == TransportKind.wifi ? _wifiList() : _bleList()),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _savedDevicesStrip() {
+    final values = savedPcs.values.toList()..sort((a, b) => b.lastSeen.compareTo(a.lastSeen));
+    return ListView.separated(
+      scrollDirection: Axis.horizontal,
+      itemCount: values.length,
+      separatorBuilder: (_, _) => const SizedBox(width: 7),
+      itemBuilder: (_, index) {
+        final saved = values[index];
+        final online = saved.transport == 'wifi' ? pcs.containsKey(saved.serverId) : (saved.bleDeviceId != null && bleDevices.containsKey(saved.bleDeviceId));
+        return InkWell(
+          onTap: () => _connectSaved(saved),
+          child: Container(
+            width: 210,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: mpPanel2, border: Border.all(color: online ? mpBlue : mpBorder)),
+            child: Row(children: [
+              Icon(saved.transport == 'ble' ? Icons.bluetooth : Icons.computer, color: online ? Colors.white : mpMuted),
+              const SizedBox(width: 9),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+                Text(saved.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 3),
+                Text(online ? '● Доступен • без QR' : '○ Не в сети', style: TextStyle(color: online ? mpGreen : mpMuted, fontSize: 10)),
+              ])),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, size: 18),
+                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                color: mpHover,
+                onSelected: (value) async {
+                  if (value == 'forget') {
+                    await DeviceStore.remove(saved.serverId);
+                    await _reloadSaved();
+                  }
+                },
+                itemBuilder: (_) => const [PopupMenuItem(value: 'forget', child: Text('Забыть устройство', style: TextStyle(color: Colors.white)))],
+              ),
+            ]),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _wifiList() {
+    if (pcs.isEmpty) return const _EmptyDiscovery(icon: Icons.wifi_find, text: 'Ожидание компьютера MacroPad Remote в локальной сети…');
+    final values = pcs.values.toList()..sort((a, b) => a.name.compareTo(b.name));
+    return ListView.separated(
+      itemCount: values.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 7),
+      itemBuilder: (_, index) {
+        final pc = values[index];
+        final saved = savedPcs[pc.serverId];
+        return Card(
+          margin: EdgeInsets.zero,
+          child: ListTile(
+            leading: const Icon(Icons.computer),
+            title: Text(pc.name),
+            subtitle: Text(saved == null ? '${pc.host}:${pc.port} • первая привязка через QR' : '${pc.host}:${pc.port} • привязан'),
+            trailing: FilledButton(onPressed: () => saved == null ? _pairWifi(pc) : _connectSaved(saved.copyWith(host: pc.host, port: pc.port)), child: Text(saved == null ? 'QR' : 'Подключить')),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _bleList() {
+    if (bleDevices.isEmpty) return const _EmptyDiscovery(icon: Icons.bluetooth_searching, text: 'Поиск MacroPad Remote по Bluetooth LE…');
+    final values = bleDevices.values.toList();
+    return ListView.separated(
+      itemCount: values.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 7),
+      itemBuilder: (_, index) {
+        final device = values[index];
+        final name = device.name?.trim().isNotEmpty == true ? device.name!.trim() : 'MacroPad Remote';
+        final saved = savedPcs.values.where((x) => x.bleDeviceId == device.deviceId).firstOrNull;
+        return Card(
+          margin: EdgeInsets.zero,
+          child: ListTile(
+            leading: const Icon(Icons.bluetooth),
+            title: Text(name),
+            subtitle: Text(saved == null ? 'Первая привязка через QR' : 'Привязан • без QR'),
+            trailing: FilledButton(onPressed: () => saved == null ? _pairBle(device) : _connectSaved(saved), child: Text(saved == null ? 'QR' : 'Подключить')),
+          ),
+        );
+      },
+    );
+  }
+}
+
+extension _IterableFirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
+}
+
+class _EmptyDiscovery extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  const _EmptyDiscovery({required this.icon, required this.text});
+  @override
+  Widget build(BuildContext context) => Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 54, color: mpMuted), const SizedBox(height: 12), Text(text, textAlign: TextAlign.center, style: const TextStyle(color: mpMuted))]));
 }
 
 class QrScannerPage extends StatefulWidget {
@@ -135,221 +678,650 @@ class _QrScannerPageState extends State<QrScannerPage> {
   bool handled = false;
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Сканировать QR')),
-        body: Stack(children: [
-          MobileScanner(
-            onDetect: (capture) {
-              if (handled || capture.barcodes.isEmpty) return;
-              final raw = capture.barcodes.first.rawValue;
-              if (raw == null || raw.isEmpty) return;
+        appBar: AppBar(title: const Row(children: [MacroPadMark(size: 22), SizedBox(width: 9), Text('Сканировать QR')])),
+        body: MobileScanner(
+          onDetect: (capture) {
+            if (handled) return;
+            for (final barcode in capture.barcodes) {
+              final raw = barcode.rawValue;
+              if (raw == null) continue;
+              final pairing = QrPairing.parse(raw);
+              if (pairing == null) continue;
               handled = true;
-              Navigator.pop(context, raw);
-            },
-          ),
-          Center(child: Container(width: 250, height: 250, decoration: BoxDecoration(border: Border.all(color: Colors.white, width: 2)))),
-          const Positioned(left: 20, right: 20, bottom: 28, child: Text('Наведите камеру на QR-код в приложении на ПК', textAlign: TextAlign.center)),
-        ]),
+              Navigator.of(context).pop(pairing);
+              return;
+            }
+          },
+        ),
       );
 }
 
+abstract class RemoteTransport {
+  Stream<String> get messages;
+  String get label;
+  Future<void> connect();
+  Future<void> send(Map<String, dynamic> message);
+  Future<void> close();
+}
+
+class WifiRemoteTransport implements RemoteTransport {
+  final String host;
+  final int port;
+  final String clientId;
+  final String? pairToken;
+  final String? deviceToken;
+  WebSocketChannel? channel;
+  StreamController<String>? controller;
+  StreamSubscription? subscription;
+
+  WifiRemoteTransport({required this.host, required this.port, required this.clientId, this.pairToken, this.deviceToken});
+
+  @override
+  String get label => 'Wi‑Fi';
+  @override
+  Stream<String> get messages => controller!.stream;
+
+  @override
+  Future<void> connect() async {
+    controller = StreamController<String>();
+    final query = <String, String>{'clientId': clientId};
+    if (pairToken?.isNotEmpty == true) query['token'] = pairToken!;
+    if (deviceToken?.isNotEmpty == true) query['deviceToken'] = deviceToken!;
+    final uri = Uri(scheme: 'ws', host: host, port: port, path: '/ws', queryParameters: query);
+    final ch = WebSocketChannel.connect(uri);
+    await ch.ready;
+    channel = ch;
+    subscription = ch.stream.listen((value) => controller?.add(value.toString()), onError: (Object error, StackTrace stack) => controller?.addError(error, stack), onDone: () => controller?.close());
+  }
+
+  @override
+  Future<void> send(Map<String, dynamic> message) async => channel?.sink.add(jsonEncode(message));
+
+  @override
+  Future<void> close() async {
+    await subscription?.cancel();
+    await channel?.sink.close();
+    await controller?.close();
+  }
+}
+
+class BleRemoteTransport implements RemoteTransport {
+  final BleDevice device;
+  final String clientId;
+  final String? pairToken;
+  final String? deviceToken;
+  final controller = StreamController<String>();
+  BleCharacteristic? command;
+  BleCharacteristic? state;
+  StreamSubscription<Uint8List>? values;
+
+  BleRemoteTransport({required this.device, required this.clientId, this.pairToken, this.deviceToken});
+
+  @override
+  String get label => 'Bluetooth LE';
+  @override
+  Stream<String> get messages => controller.stream;
+
+  @override
+  Future<void> connect() async {
+    await device.connect();
+    await device.discoverServices();
+    command = await device.getCharacteristic(commandUuid, service: serviceUuid);
+    state = await device.getCharacteristic(stateUuid, service: serviceUuid);
+    values = UniversalBle.characteristicValueStream(device.deviceId, stateUuid).listen((data) async {
+      final text = utf8.decode(data, allowMalformed: true);
+      try {
+        final json = jsonDecode(text);
+        if (json is Map && json['type'] == 'state_changed') {
+          await _readState();
+        } else {
+          controller.add(text);
+        }
+      } catch (_) { controller.add(text); }
+    });
+    try { await UniversalBle.subscribeNotifications(device.deviceId, serviceUuid, stateUuid); } catch (_) {}
+    await command!.write(utf8.encode(jsonEncode({'type': 'auth', 'clientId': clientId, 'token': pairToken ?? '', 'deviceToken': deviceToken ?? ''})), withResponse: true);
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    await _readState();
+  }
+
+  Future<void> _readState() async {
+    final data = await state!.read();
+    if (data.isNotEmpty) controller.add(utf8.decode(data, allowMalformed: true));
+  }
+
+  @override
+  Future<void> send(Map<String, dynamic> message) async => command!.write(utf8.encode(jsonEncode(message)), withResponse: true);
+
+  @override
+  Future<void> close() async {
+    await values?.cancel();
+    try { if (state != null) await state!.unsubscribe(); } catch (_) {}
+    try { await device.disconnect(); } catch (_) {}
+    await controller.close();
+  }
+}
+
 class RemotePage extends StatefulWidget {
-  final String url;
-  const RemotePage({super.key, required this.url});
+  final RemoteTransport transport;
+  final ClientFormFactor formFactor;
+  final String clientId;
+  final String initialServerId;
+  final String initialServerName;
+  final String host;
+  final int port;
+  final String transportName;
+  final String? bleDeviceId;
+  final List<SavedPc> savedDevices;
+  final Future<void> Function(SavedPc pc) onPaired;
+
+  const RemotePage({super.key, required this.transport, required this.formFactor, required this.clientId, required this.initialServerId, required this.initialServerName, required this.host, required this.port, required this.transportName, required this.savedDevices, required this.onPaired, this.bleDeviceId});
+
   @override
   State<RemotePage> createState() => _RemotePageState();
 }
 
 class _RemotePageState extends State<RemotePage> {
-  WebSocketChannel? channel;
-  StreamSubscription? sub;
-  RemoteProfile? profile;
+  StreamSubscription<String>? subscription;
+  ProfileSnapshot? profile;
+  List<WorkspaceProfileSummary> profiles = const [];
   int tab = 0;
-  String status = 'Подключение...';
+  String status = 'Подключение…';
+  String? connectionError;
+  String serverId = '';
+  String serverName = '';
 
   @override
-  void initState() { super.initState(); connect(); }
-
-  Future<void> connect() async {
-    try {
-      final ch = WebSocketChannel.connect(Uri.parse(widget.url));
-      await ch.ready;
-      if (!mounted) return;
-      setState(() { channel = ch; status = 'Подключено'; });
-      sub = ch.stream.listen(onData, onError: (_) { if (mounted) setState(() => status = 'Ошибка'); }, onDone: () { if (mounted) setState(() => status = 'Отключено'); });
-    } catch (_) { if (mounted) setState(() => status = 'Не удалось подключиться'); }
+  void initState() {
+    super.initState();
+    serverId = widget.initialServerId;
+    serverName = widget.initialServerName;
+    _connect();
   }
 
-  void onData(dynamic message) {
+  Future<void> _connect() async {
+    if (mounted) setState(() { status = 'Подключение…'; connectionError = null; });
     try {
-      final json = jsonDecode(message as String);
-      if (json['type'] == 'profile' && json['profile'] != null) setState(() => profile = RemoteProfile.fromJson(Map<String, dynamic>.from(json['profile'])));
+      await widget.transport.connect();
+      subscription = widget.transport.messages.listen(_onMessage, onError: (Object error) {
+        if (mounted) setState(() { status = 'Ошибка связи'; connectionError = _friendlyConnectionError(error); });
+      }, onDone: () {
+        if (mounted) setState(() => status = 'Отключено');
+      });
+      await widget.transport.send({
+        'type': 'clientInfo',
+        'clientId': widget.clientId,
+        'formFactor': widget.formFactor == ClientFormFactor.tablet ? 'tablet' : 'phone',
+        'deviceName': '${formFactorLabel(widget.formFactor)} ${widget.clientId.length > 4 ? widget.clientId.substring(widget.clientId.length - 4) : widget.clientId}',
+      });
+      if (mounted) setState(() => status = widget.transport.label);
+    } catch (e) {
+      if (mounted) setState(() { status = 'Ошибка подключения'; connectionError = _friendlyConnectionError(e); });
+    }
+  }
+
+  String _friendlyConnectionError(Object error) {
+    final raw = error.toString();
+    if (raw.contains('401')) return 'ПК отклонил сохранённую привязку. Удалите устройство из списка и выполните подключение через QR заново.';
+    if (raw.contains('No route to host') || raw.contains('Network is unreachable')) return 'ПК найден, но сетевой адрес недоступен. Устройства должны быть в одной локальной сети.';
+    if (raw.contains('Connection refused')) return 'ПК доступен, но MacroPad Remote не принимает соединение. Проверьте приложение на ПК и Windows Firewall.';
+    return raw;
+  }
+
+  Future<void> _onMessage(String message) async {
+    try {
+      final json = jsonDecode(message);
+      if (json is! Map<String, dynamic>) return;
+      if (json['type'] == 'paired') {
+        serverId = '${json['serverId'] ?? serverId}';
+        serverName = '${json['serverName'] ?? serverName}';
+        final token = '${json['deviceToken'] ?? ''}';
+        if (token.isNotEmpty && serverId.isNotEmpty) {
+          await widget.onPaired(SavedPc(
+            serverId: serverId,
+            name: serverName.isEmpty ? 'MacroPad PC' : serverName,
+            host: widget.host,
+            port: widget.port,
+            deviceToken: token,
+            transport: widget.transportName,
+            bleDeviceId: widget.bleDeviceId,
+            lastSeen: DateTime.now(),
+          ));
+        }
+        return;
+      }
+      if (json['type'] == 'profile' && json['profile'] is Map) {
+        serverId = '${json['serverId'] ?? serverId}';
+        serverName = '${json['serverName'] ?? serverName}';
+        final pairedToken = '${json['deviceToken'] ?? ''}';
+        if (pairedToken.isNotEmpty && serverId.isNotEmpty) {
+          await widget.onPaired(SavedPc(
+            serverId: serverId,
+            name: serverName.isEmpty ? 'MacroPad PC' : serverName,
+            host: widget.host,
+            port: widget.port,
+            deviceToken: pairedToken,
+            transport: widget.transportName,
+            bleDeviceId: widget.bleDeviceId,
+            lastSeen: DateTime.now(),
+          ));
+        }
+        final p = ProfileSnapshot.fromJson(Map<String, dynamic>.from(json['profile'] as Map));
+        final summaries = ((json['profiles'] ?? const []) as List)
+            .map((item) => WorkspaceProfileSummary.fromJson(Map<String, dynamic>.from(item as Map)))
+            .toList();
+        if (mounted) setState(() { profile = p; profiles = summaries; });
+      }
     } catch (_) {}
   }
 
-  void send(String hotkey) { if (hotkey.isNotEmpty) channel?.sink.add(jsonEncode({'hotkey': hotkey})); }
-  @override
-  void dispose() { sub?.cancel(); channel?.sink.close(); super.dispose(); }
+  Future<void> _sendTile(TileSnapshot tile) => widget.transport.send({'type': 'press', 'tileId': tile.id});
+  Future<void> _sendHotkey(String hotkey) => widget.transport.send({'type': 'hotkey', 'hotkey': hotkey});
+  Future<void> _switchProfile(String profileId) => widget.transport.send({'type': 'switchProfile', 'profileId': profileId});
+  Future<void> _switchPage(String pageId) => widget.transport.send({'type': 'switchPage', 'pageId': pageId});
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: Text(profile?.name ?? 'MacroPad Remote'), actions: [Padding(padding: const EdgeInsets.only(right: 14), child: Center(child: Row(children: [Icon(Icons.circle, size: 9, color: status == 'Подключено' ? Colors.green : Colors.grey), const SizedBox(width: 7), Text(status)])))]),
-        body: SafeArea(child: [deck(), touchpad(), keyboard(), media()][tab]),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: tab,
-          onDestinationSelected: (i) => setState(() => tab = i),
-          destinations: const [
-            NavigationDestination(icon: Icon(Icons.grid_view), label: 'Deck'),
-            NavigationDestination(icon: Icon(Icons.touch_app), label: 'Touchpad'),
-            NavigationDestination(icon: Icon(Icons.keyboard), label: 'Keyboard'),
-            NavigationDestination(icon: Icon(Icons.play_circle), label: 'Media'),
+  void dispose() {
+    subscription?.cancel();
+    widget.transport.close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = <Widget>[deck(), media()];
+    if (tab >= pages.length) tab = 0;
+    return Scaffold(
+      drawer: _drawer(),
+      appBar: AppBar(
+        title: Row(mainAxisSize: MainAxisSize.min, children: [const MacroPadMark(size: 22), const SizedBox(width: 9), Flexible(child: Text(profile?.name ?? 'MacroPad Remote', overflow: TextOverflow.ellipsis))]),
+        actions: [
+          IconButton(tooltip: 'Повернуть экран', onPressed: () => toggleScreenOrientation(context), icon: const Icon(Icons.screen_rotation)),
+          Padding(
+            padding: const EdgeInsets.only(right: 10),
+            child: Center(child: Row(children: [Icon(Icons.circle, size: 8, color: connectionError == null && status != 'Отключено' ? mpGreen : mpMuted), const SizedBox(width: 6), Text(status, style: const TextStyle(fontSize: 11))])),
+          ),
+        ],
+      ),
+      body: SafeArea(child: connectionError == null ? pages[tab] : _connectionErrorView()),
+      bottomNavigationBar: connectionError == null ? _SharpBottomNav(selectedIndex: tab, onSelected: (value) => setState(() => tab = value), items: const [_SharpNavItem(Icons.grid_view, 'Deck'), _SharpNavItem(Icons.play_circle_outline, 'Media')]) : null,
+    );
+  }
+
+  Widget _drawer() {
+    final activeId = profile?.id;
+    final saved = widget.savedDevices;
+    return Drawer(
+      child: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              height: 68,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: mpBorder))),
+              child: Row(children: [const MacroPadMark(size: 28), const SizedBox(width: 11), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('MacroPad Remote', style: TextStyle(fontWeight: FontWeight.w600)), Text(serverName.isEmpty ? 'Подключено' : serverName, style: const TextStyle(color: mpMuted, fontSize: 11))]))]),
+            ),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  const Padding(padding: EdgeInsets.fromLTRB(16, 14, 16, 6), child: Text('ПРОФИЛИ', style: TextStyle(color: mpMuted, fontSize: 10, letterSpacing: 1))),
+                  for (final item in profiles)
+                    ListTile(
+                      dense: true,
+                      selected: item.id == activeId,
+                      selectedTileColor: mpHover,
+                      leading: Text(item.icon.isEmpty ? '•' : item.icon, style: TextStyle(color: item.id == activeId ? mpBlue : Colors.white, fontWeight: FontWeight.bold)),
+                      title: Text(item.name),
+                      onTap: () async { Navigator.of(context).pop(); if (item.id != activeId) await _switchProfile(item.id); },
+                    ),
+                  if (profile != null) ...[
+                    const Divider(height: 1),
+                    const Padding(padding: EdgeInsets.fromLTRB(16, 14, 16, 6), child: Text('СТРАНИЦЫ', style: TextStyle(color: mpMuted, fontSize: 10, letterSpacing: 1))),
+                    for (var i = 0; i < profile!.pages.length; i++)
+                      ListTile(
+                        dense: true,
+                        selected: profile!.pages[i].id == profile!.pageId,
+                        selectedTileColor: mpHover,
+                        leading: SizedBox(width: 24, child: Text('${i + 1}', textAlign: TextAlign.center)),
+                        title: Text(profile!.pages[i].name),
+                        onTap: () async { Navigator.of(context).pop(); if (profile!.pages[i].id != profile!.pageId) await _switchPage(profile!.pages[i].id); },
+                      ),
+                  ],
+                  const Divider(height: 1),
+                  const Padding(padding: EdgeInsets.fromLTRB(16, 14, 16, 6), child: Text('УСТРОЙСТВА', style: TextStyle(color: mpMuted, fontSize: 10, letterSpacing: 1))),
+                  for (final pc in saved)
+                    ListTile(
+                      dense: true,
+                      selected: pc.serverId == serverId,
+                      selectedTileColor: mpHover,
+                      leading: Icon(pc.transport == 'ble' ? Icons.bluetooth : Icons.computer, size: 20),
+                      title: Text(pc.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      subtitle: Text(pc.serverId == serverId ? 'Текущее устройство' : 'Переключить без QR', style: const TextStyle(fontSize: 10, color: mpMuted)),
+                      onTap: pc.serverId == serverId ? null : () {
+                        Navigator.of(context).pop();
+                        Future<void>.delayed(const Duration(milliseconds: 120), () {
+                          if (mounted) Navigator.of(context).pop(pc.serverId);
+                        });
+                      },
+                    ),
+                ],
+              ),
+            ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _connectionErrorView() => Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: Container(
+            margin: const EdgeInsets.all(18),
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(color: mpPanel, border: Border.all(color: mpBorder)),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              const Text('Не удалось подключиться', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 10),
+              Text(connectionError ?? '', style: const TextStyle(color: mpMuted)),
+              const SizedBox(height: 14),
+              Row(children: [Expanded(child: OutlinedButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Назад'))), const SizedBox(width: 8), Expanded(child: FilledButton(onPressed: _connect, child: const Text('Повторить')))]),
+            ]),
+          ),
         ),
       );
 
   Widget deck() {
     final p = profile;
     if (p == null) return const Center(child: CircularProgressIndicator());
-    return LayoutBuilder(builder: (context, bounds) {
-      const gap = 7.0;
-      final cols = p.columns.clamp(1, 12).toInt();
-      final rows = p.rows.clamp(1, 12).toInt();
-      final cellW = (bounds.maxWidth - 24 - gap * (cols - 1)) / cols;
-      final cellH = cellW * 0.82;
-      final placements = packTiles(p.tiles, rows, cols);
-      final height = rows * cellH + gap * (rows - 1) + 24;
-      return SingleChildScrollView(
-        padding: const EdgeInsets.all(12),
-        child: SizedBox(
-          height: height,
-          child: Stack(
-            children: placements.map((placed) {
-              final t = placed.tile;
-              return Positioned(
-                left: placed.col * (cellW + gap),
-                top: placed.row * (cellH + gap),
-                width: placed.columnSpan * cellW + (placed.columnSpan - 1) * gap,
-                height: placed.rowSpan * cellH + (placed.rowSpan - 1) * gap,
-                child: Material(
-                  color: const Color(0xff24282c),
-                  shape: const RoundedRectangleBorder(side: BorderSide(color: Color(0xff3b4147))),
-                  child: InkWell(
-                    onTap: () => send(t.hotkey),
-                    child: Padding(
-                      padding: const EdgeInsets.all(7),
-                      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                        Icon(iconFor(t.title), size: 30),
-                        const SizedBox(height: 8),
-                        Text(t.title, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis),
-                      ]),
-                    ),
-                  ),
+    return Column(
+      children: [
+        _pageSelector(p),
+        Expanded(child: _deckCanvas(p)),
+      ],
+    );
+  }
+
+  Widget _pageSelector(ProfileSnapshot p) {
+    if (p.pages.length <= 1) return const SizedBox(height: 6);
+    return Container(
+      height: 48,
+      decoration: const BoxDecoration(color: mpPanel, border: Border(bottom: BorderSide(color: mpBorder))),
+      child: ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        scrollDirection: Axis.horizontal,
+        itemCount: p.pages.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 5),
+        itemBuilder: (_, i) {
+          final page = p.pages[i];
+          final selected = page.id == p.pageId;
+          return InkWell(
+            onTap: selected ? null : () => _switchPage(page.id),
+            child: Container(
+              constraints: const BoxConstraints(minWidth: 34),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(color: selected ? mpHover : mpPanel2, border: Border.all(color: selected ? mpBlue : mpBorder)),
+              alignment: Alignment.center,
+              child: Text('${i + 1}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _deckCanvas(ProfileSnapshot p) {
+    return LayoutBuilder(
+      builder: (_, constraints) {
+        final columns = p.columns.clamp(1, 12).toInt();
+        final isPhonePortrait = widget.formFactor == ClientFormFactor.phone && MediaQuery.orientationOf(context) == Orientation.portrait;
+        const gapBase = 7.0;
+        const padBase = 10.0;
+        double cellW;
+        double cellH;
+        double uiScale;
+        double gap;
+        double pad;
+
+        if (isPhonePortrait) {
+          const baseCellW = 98.0;
+          const baseCellH = 76.0;
+          final baseGridWidth = padBase * 2 + columns * baseCellW + (columns - 1) * gapBase;
+          final scale = (constraints.maxWidth / baseGridWidth).clamp(0.20, 1.0);
+          cellW = baseCellW * scale;
+          cellH = baseCellH * scale;
+          gap = gapBase * scale;
+          pad = padBase * scale;
+          uiScale = scale.clamp(.38, 1.0);
+        } else {
+          gap = gapBase;
+          pad = 12;
+          final usable = (constraints.maxWidth - pad * 2 - gap * (columns - 1)).clamp(1.0, double.infinity);
+          cellW = usable / columns;
+          cellH = cellW * .78;
+          uiScale = (cellW / 105).clamp(.62, 1.18);
+        }
+
+        final packed = packTiles(p.tiles, p.rows, columns);
+        final totalH = pad * 2 + p.rows * cellH + (p.rows - 1) * gap;
+        return SingleChildScrollView(
+          child: SizedBox(
+            height: totalH,
+            child: Stack(children: [
+              for (final item in packed)
+                Positioned(
+                  left: pad + item.column * (cellW + gap),
+                  top: pad + item.row * (cellH + gap),
+                  width: item.columnSpan * cellW + (item.columnSpan - 1) * gap,
+                  height: item.rowSpan * cellH + (item.rowSpan - 1) * gap,
+                  child: _remoteTile(item.tile, uiScale),
                 ),
-              );
-            }).toList(),
+            ]),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _remoteTile(TileSnapshot tile, double scale) {
+    final blank = tile.actionType.isEmpty && tile.title.toLowerCase() == 'добавить';
+    final iconSize = (27 * scale).clamp(13.0, 30.0);
+    final fontSize = (12 * scale).clamp(7.5, 13.0);
+    final padding = (7 * scale).clamp(2.0, 8.0);
+    return Material(
+      color: blank ? mpPanel : mpPanel2,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: BorderSide(color: mpBorder, width: 1)),
+      child: InkWell(
+        onTap: blank ? null : () => _sendTile(tile),
+        child: Padding(
+          padding: EdgeInsets.all(padding),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(_iconFor(tile), size: iconSize, color: blank ? const Color(0xff7c8287) : Colors.white),
+            SizedBox(height: (5 * scale).clamp(1.0, 6.0)),
+            Flexible(child: Text(tile.title, textAlign: TextAlign.center, maxLines: scale < .52 ? 1 : 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: fontSize, color: blank ? const Color(0xff7c8287) : Colors.white, fontWeight: FontWeight.w600, height: 1.05))),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  IconData _iconFor(TileSnapshot tile) => switch (tile.actionType) {
+        'hotkey' => Icons.keyboard,
+        'text' => Icons.text_fields,
+        'open' => Icons.open_in_new,
+        'url' => Icons.public,
+        'folder' => Icons.folder_outlined,
+        'multi' => Icons.queue_play_next,
+        'profile' => Icons.swap_horiz,
+        'media' => Icons.play_arrow,
+        _ => Icons.add,
+      };
+
+  Widget media() => Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: GridView.count(
+            padding: const EdgeInsets.all(18),
+            shrinkWrap: true,
+            crossAxisCount: 2,
+            mainAxisSpacing: 8,
+            crossAxisSpacing: 8,
+            childAspectRatio: 2.0,
+            children: [
+              _mediaButton(Icons.volume_down, 'Громкость −', 'VOLUME_DOWN'),
+              _mediaButton(Icons.volume_up, 'Громкость +', 'VOLUME_UP'),
+              _mediaButton(Icons.play_arrow, 'Play / Pause', 'MEDIA_PLAY'),
+              _mediaButton(Icons.volume_off, 'Без звука', 'VOLUME_MUTE'),
+            ],
           ),
         ),
       );
-    });
-  }
 
-  List<PlacedTile> packTiles(List<RemoteTile> tiles, int rows, int cols) {
-    final used = List.generate(rows, (_) => List<bool>.filled(cols, false));
-    final result = <PlacedTile>[];
-    for (final tile in tiles) {
-      final rs = tile.rowSpan.clamp(1, rows).toInt();
-      final cs = tile.columnSpan.clamp(1, cols).toInt();
-      var placed = false;
-      for (var r = 0; r < rows && !placed; r++) {
-        for (var c = 0; c < cols && !placed; c++) {
-          if (r + rs > rows || c + cs > cols) continue;
-          var ok = true;
-          for (var y = 0; y < rs && ok; y++) {
-            for (var x = 0; x < cs; x++) {
-              if (used[r + y][c + x]) { ok = false; break; }
-            }
-          }
-          if (!ok) continue;
-          for (var y = 0; y < rs; y++) {
-            for (var x = 0; x < cs; x++) { used[r + y][c + x] = true; }
-          }
-          result.add(PlacedTile(tile, r, c, rs, cs));
-          placed = true;
-        }
-      }
-    }
-    return result;
-  }
-
-  IconData iconFor(String title) {
-    final q = title.toLowerCase();
-    if (q.contains('сохран')) return Icons.save_outlined;
-    if (q.contains('скрин')) return Icons.crop_free;
-    if (q.contains('брауз')) return Icons.public;
-    if (q.contains('пап')) return Icons.folder_outlined;
-    if (q.contains('восп')) return Icons.play_arrow;
-    if (q.contains('звук')) return Icons.volume_off;
-    if (q.contains('назад')) return Icons.arrow_back;
-    return Icons.apps;
-  }
-
-  Widget touchpad() => Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(children: [
-          Expanded(child: Container(decoration: BoxDecoration(color: const Color(0xff202326), border: Border.all(color: const Color(0xff3b4147))), child: const Center(child: Text('Touchpad\nследующий этап', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey))))),
-          const SizedBox(height: 10),
-          Row(children: [Expanded(child: OutlinedButton(onPressed: () => send('ENTER'), child: const Text('Left'))), const SizedBox(width: 8), Expanded(child: OutlinedButton(onPressed: () => send('ESC'), child: const Text('Right')))]),
-        ]),
+  Widget _mediaButton(IconData icon, String label, String hotkey) => Material(
+        color: mpPanel2,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: BorderSide(color: mpBorder)),
+        child: InkWell(onTap: () => _sendHotkey(hotkey), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(icon, color: Colors.white, size: 30), const SizedBox(height: 7), Text(label, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white))])),
       );
-
-  Widget keyboard() => ListView(padding: const EdgeInsets.all(16), children: [
-        const Text('Keyboard', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600)),
-        const SizedBox(height: 14),
-        Wrap(spacing: 8, runSpacing: 8, children: [key('Ctrl+C', 'CTRL+C'), key('Ctrl+V', 'CTRL+V'), key('Ctrl+Z', 'CTRL+Z'), key('Ctrl+S', 'CTRL+S'), key('Alt+Tab', 'ALT+TAB'), key('Win+D', 'WIN+D'), key('Enter', 'ENTER'), key('Esc', 'ESC'), key('←', 'LEFT'), key('↑', 'UP'), key('↓', 'DOWN'), key('→', 'RIGHT')]),
-      ]);
-
-  Widget key(String title, String hotkey) => SizedBox(width: 105, height: 62, child: OutlinedButton(onPressed: () => send(hotkey), child: Text(title, textAlign: TextAlign.center)));
-
-  Widget media() => Center(child: Wrap(spacing: 12, runSpacing: 12, children: [
-        IconButton.filledTonal(onPressed: () => send('VOLUME_DOWN'), icon: const Icon(Icons.volume_down), iconSize: 34),
-        IconButton.filled(onPressed: () => send('MEDIA_PLAY'), icon: const Icon(Icons.play_arrow), iconSize: 38),
-        IconButton.filledTonal(onPressed: () => send('VOLUME_UP'), icon: const Icon(Icons.volume_up), iconSize: 34),
-        IconButton.filledTonal(onPressed: () => send('VOLUME_MUTE'), icon: const Icon(Icons.volume_off), iconSize: 34),
-      ]));
 }
 
-class RemoteProfile {
+class _SharpNavItem {
+  final IconData icon;
+  final String label;
+  const _SharpNavItem(this.icon, this.label);
+}
+
+class _SharpBottomNav extends StatelessWidget {
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+  final List<_SharpNavItem> items;
+  const _SharpBottomNav({required this.selectedIndex, required this.onSelected, required this.items});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        decoration: const BoxDecoration(color: mpPanel, border: Border(top: BorderSide(color: mpBorder))),
+        child: SafeArea(
+          top: false,
+          child: SizedBox(
+            height: 66,
+            child: Row(children: [
+              for (var i = 0; i < items.length; i++)
+                Expanded(
+                  child: InkWell(
+                    onTap: () => onSelected(i),
+                    child: Container(
+                      decoration: BoxDecoration(color: i == selectedIndex ? mpHover : mpPanel, border: Border(top: BorderSide(color: i == selectedIndex ? mpBlue : Colors.transparent, width: 2), right: i < items.length - 1 ? const BorderSide(color: mpBorder) : BorderSide.none)),
+                      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(items[i].icon, color: Colors.white, size: 23), const SizedBox(height: 4), Text(items[i].label, style: const TextStyle(color: Colors.white, fontSize: 11))]),
+                    ),
+                  ),
+                ),
+            ]),
+          ),
+        ),
+      );
+}
+
+class PageSummary {
+  final String id;
   final String name;
+  const PageSummary({required this.id, required this.name});
+  factory PageSummary.fromJson(Map<String, dynamic> json) => PageSummary(id: '${json['id'] ?? ''}', name: '${json['name'] ?? 'Страница'}');
+}
+
+class WorkspaceProfileSummary {
+  final String id;
+  final String name;
+  final String icon;
+  final String activePageId;
+  final List<PageSummary> pages;
+  const WorkspaceProfileSummary({required this.id, required this.name, required this.icon, required this.activePageId, required this.pages});
+  factory WorkspaceProfileSummary.fromJson(Map<String, dynamic> json) => WorkspaceProfileSummary(
+        id: '${json['id'] ?? ''}',
+        name: '${json['name'] ?? 'Profile'}',
+        icon: '${json['icon'] ?? ''}',
+        activePageId: '${json['activePageId'] ?? ''}',
+        pages: ((json['pages'] ?? const []) as List).map((x) => PageSummary.fromJson(Map<String, dynamic>.from(x as Map))).toList(),
+      );
+}
+
+class ProfileSnapshot {
+  final String id;
+  final String name;
+  final String icon;
+  final String pageId;
+  final String pageName;
   final int rows;
   final int columns;
-  final List<RemoteTile> tiles;
-  RemoteProfile(this.name, this.rows, this.columns, this.tiles);
-  factory RemoteProfile.fromJson(Map<String, dynamic> json) => RemoteProfile(
-        json['name'] ?? json['Name'] ?? 'Profile',
-        (json['rows'] ?? json['Rows'] ?? 3) as int,
-        (json['columns'] ?? json['Columns'] ?? 4) as int,
-        ((json['tiles'] ?? json['Tiles'] ?? []) as List).map((e) => RemoteTile.fromJson(Map<String, dynamic>.from(e))).toList(),
+  final List<PageSummary> pages;
+  final List<TileSnapshot> tiles;
+  const ProfileSnapshot({required this.id, required this.name, required this.icon, required this.pageId, required this.pageName, required this.rows, required this.columns, required this.pages, required this.tiles});
+
+  factory ProfileSnapshot.fromJson(Map<String, dynamic> json) => ProfileSnapshot(
+        id: '${json['id'] ?? ''}',
+        name: '${json['name'] ?? 'Profile'}',
+        icon: '${json['icon'] ?? ''}',
+        pageId: '${json['pageId'] ?? json['activePageId'] ?? ''}',
+        pageName: '${json['pageName'] ?? 'Страница'}',
+        rows: (json['rows'] as num?)?.toInt() ?? 3,
+        columns: (json['columns'] as num?)?.toInt() ?? 4,
+        pages: ((json['pages'] ?? const []) as List).map((x) => PageSummary.fromJson(Map<String, dynamic>.from(x as Map))).toList(),
+        tiles: ((json['tiles'] ?? const []) as List).map((item) => TileSnapshot.fromJson(Map<String, dynamic>.from(item as Map))).toList(),
       );
 }
 
-class RemoteTile {
+class TileSnapshot {
+  final String id;
   final String title;
-  final String hotkey;
+  final String actionType;
   final int rowSpan;
   final int columnSpan;
-  RemoteTile(this.title, this.hotkey, this.rowSpan, this.columnSpan);
-  factory RemoteTile.fromJson(Map<String, dynamic> json) => RemoteTile(
-        json['title'] ?? json['Title'] ?? 'Кнопка',
-        json['hotkey'] ?? json['Hotkey'] ?? '',
-        (json['rowSpan'] ?? json['RowSpan'] ?? 1) as int,
-        (json['columnSpan'] ?? json['ColumnSpan'] ?? 1) as int,
+  const TileSnapshot({required this.id, required this.title, required this.actionType, required this.rowSpan, required this.columnSpan});
+  factory TileSnapshot.fromJson(Map<String, dynamic> json) => TileSnapshot(
+        id: '${json['id'] ?? ''}',
+        title: '${json['title'] ?? 'Кнопка'}',
+        actionType: '${json['actionType'] ?? ''}',
+        rowSpan: ((json['rowSpan'] as num?)?.toInt() ?? 1).clamp(1, 12).toInt(),
+        columnSpan: ((json['columnSpan'] as num?)?.toInt() ?? 1).clamp(1, 12).toInt(),
       );
 }
 
-class PlacedTile {
-  final RemoteTile tile;
+class PackedTile {
+  final TileSnapshot tile;
   final int row;
-  final int col;
+  final int column;
   final int rowSpan;
   final int columnSpan;
-  PlacedTile(this.tile, this.row, this.col, this.rowSpan, this.columnSpan);
+  const PackedTile(this.tile, this.row, this.column, this.rowSpan, this.columnSpan);
+}
+
+List<PackedTile> packTiles(List<TileSnapshot> tiles, int rawRows, int rawColumns) {
+  final rows = rawRows.clamp(1, 12).toInt();
+  final columns = rawColumns.clamp(1, 12).toInt();
+  final used = List.generate(rows, (_) => List<bool>.filled(columns, false));
+  final result = <PackedTile>[];
+  for (final tile in tiles) {
+    final rs = tile.rowSpan.clamp(1, rows);
+    final cs = tile.columnSpan.clamp(1, columns);
+    var placed = false;
+    for (var row = 0; row < rows && !placed; row++) {
+      for (var column = 0; column < columns && !placed; column++) {
+        if (row + rs > rows || column + cs > columns) continue;
+        var free = true;
+        for (var y = 0; y < rs && free; y++) {
+          for (var x = 0; x < cs; x++) {
+            if (used[row + y][column + x]) { free = false; break; }
+          }
+        }
+        if (!free) continue;
+        for (var y = 0; y < rs; y++) {
+          for (var x = 0; x < cs; x++) {
+            used[row + y][column + x] = true;
+          }
+        }
+        result.add(PackedTile(tile, row, column, rs, cs));
+        placed = true;
+      }
+    }
+  }
+  return result;
 }
