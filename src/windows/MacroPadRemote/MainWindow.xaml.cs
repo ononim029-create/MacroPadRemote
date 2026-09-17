@@ -54,6 +54,9 @@ public partial class MainWindow : Window
     private Point _tileDragStart;
     private Window? _qrWindow;
     private readonly Dictionary<string, List<ushort>> _heldRemoteKeys = new();
+    private System.Windows.Forms.NotifyIcon? _trayIcon;
+    private bool _allowExit;
+    private bool _trayHintShown;
 
     public MainWindow()
     {
@@ -86,22 +89,30 @@ public partial class MainWindow : Window
 
         ApplyTransport();
         RefreshProfiles();
+        SetupTrayIcon();
         Loaded += MainWindow_Loaded;
+        StateChanged += MainWindow_StateChanged;
+        Closing += MainWindow_Closing;
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         BeginStartupAnimation();
+        StartupStatus.Text = "Подготовка рабочего пространства…";
         UpdateZoom();
+        await Task.Delay(120);
         try
         {
+            StartupStatus.Text = "Запуск связи с устройствами…";
             await StartSelectedTransportAsync();
+            StartupStatus.Text = "Готово";
         }
         catch (Exception ex)
         {
             DeviceStatus.Text = $"Ошибка связи: {ex.Message}";
+            StartupStatus.Text = "NEXO запущен • связь можно перезапустить в настройках";
         }
-        await Task.Delay(420);
+        await Task.Delay(260);
         HideStartupOverlay();
     }
 
@@ -117,6 +128,82 @@ public partial class MainWindow : Window
         var fade = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(260)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
         fade.Completed += (_, _) => StartupOverlay.Visibility = Visibility.Collapsed;
         StartupOverlay.BeginAnimation(OpacityProperty, fade);
+    }
+
+
+    private void SetupTrayIcon()
+    {
+        try
+        {
+            var menu = new System.Windows.Forms.ContextMenuStrip();
+            menu.Items.Add("Открыть NEXO", null, (_, _) => Dispatcher.BeginInvoke(ShowFromTray));
+            menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+            menu.Items.Add("Выход", null, (_, _) => Dispatcher.BeginInvoke(new Action(() => _ = ExitFromTrayAsync())));
+
+            var icon = System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName ?? "");
+            _trayIcon = new System.Windows.Forms.NotifyIcon
+            {
+                Text = "NEXO — удалённое управление компьютером",
+                Visible = true,
+                ContextMenuStrip = menu,
+                Icon = icon
+            };
+            _trayIcon.DoubleClick += (_, _) => Dispatcher.BeginInvoke(ShowFromTray);
+        }
+        catch
+        {
+            _trayIcon = null;
+        }
+    }
+
+    private void MainWindow_StateChanged(object? sender, EventArgs e)
+    {
+        if (WindowState == WindowState.Minimized)
+            HideToTray();
+    }
+
+    private void MainWindow_Closing(object? sender, CancelEventArgs e)
+    {
+        if (_allowExit) return;
+        e.Cancel = true;
+        HideToTray();
+    }
+
+    private void HideToTray()
+    {
+        ShowInTaskbar = false;
+        Hide();
+        if (_trayIcon is not null && !_trayHintShown)
+        {
+            _trayHintShown = true;
+            _trayIcon.BalloonTipTitle = "NEXO продолжает работать";
+            _trayIcon.BalloonTipText = "Приложение скрыто в системный трей и продолжает принимать команды с телефона и планшета.";
+            _trayIcon.ShowBalloonTip(2600);
+        }
+    }
+
+    private void ShowFromTray()
+    {
+        ShowInTaskbar = true;
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+        Topmost = true;
+        Topmost = false;
+        Focus();
+    }
+
+    private async Task ExitFromTrayAsync()
+    {
+        _allowExit = true;
+        if (_trayIcon is not null)
+        {
+            _trayIcon.Visible = false;
+            _trayIcon.Dispose();
+            _trayIcon = null;
+        }
+        try { await StopAllTransportsAsync(); } catch { }
+        System.Windows.Application.Current.Shutdown();
     }
 
     private void LoadState()
