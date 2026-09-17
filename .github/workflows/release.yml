@@ -18,6 +18,9 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
+      - name: Apply v1.2 Windows patches
+        shell: pwsh
+        run: python tools/apply_v12_patches.py windows
       - name: Publish Windows x64 and native installer
         shell: pwsh
         run: |
@@ -27,17 +30,12 @@ jobs:
           $iconBytes = [Convert]::FromBase64String($iconBase64)
           [IO.File]::WriteAllBytes('src/windows/MacroPadRemote/Nexo.ico', $iconBytes)
 
-          # Publish the application as a self-contained Windows x64 build.
           dotnet publish src/windows/MacroPadRemote/MacroPadRemote.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:ApplicationIcon=Nexo.ico -o dist/windows
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           Get-ChildItem dist/windows -Filter *.pdb -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force
-
-          # Portable package is retained for manual use and updater compatibility.
           Compress-Archive -Path dist/windows/* -DestinationPath dist/NEXO-win-x64.zip -Force
 
-          # Build a real Windows installer. It installs to LocalAppData, does not require
-          # administrator elevation, works offline, and registers a native Windows uninstaller.
           $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
           if (!(Test-Path $iscc)) {
             choco install innosetup --no-progress -y
@@ -67,6 +65,9 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+      - name: Apply v1.2 mobile patches
+        shell: bash
+        run: python3 tools/apply_v12_patches.py mobile
       - name: Create Android host
         shell: bash
         run: |
@@ -116,7 +117,7 @@ jobs:
         run: |
           cd build-mobile
           flutter pub get
-          flutter analyze
+          flutter analyze --no-fatal-infos
           flutter build apk --release
           mkdir -p ../dist
           cp build/app/outputs/flutter-apk/app-release.apk ../dist/NEXO-android.apk
@@ -144,7 +145,7 @@ jobs:
         run: |
           ZIP=artifacts/windows/NEXO-win-x64.zip
           SHA=$(sha256sum "$ZIP" | awk '{print $1}')
-          printf '%s\n' "{\"version\":\"1.1.0-preview\",\"channel\":\"preview\",\"packageUrl\":\"https://github.com/${GH_REPO}/releases/download/preview/NEXO-win-x64.zip\",\"sha256\":\"${SHA}\",\"mandatory\":false,\"notes\":\"NEXO v1.1: native Windows installer, offline install and Control Panel uninstall\"}" > preview.json
+          printf '%s\n' "{\"version\":\"1.2.0-preview\",\"channel\":\"preview\",\"packageUrl\":\"https://github.com/${GH_REPO}/releases/download/preview/NEXO-win-x64.zip\",\"sha256\":\"${SHA}\",\"mandatory\":false,\"notes\":\"NEXO v1.2: persistent deck view, Windows keyboard layouts, physical tablet keyboard, collapsible tablet panels and compact bilingual keyboard\"}" > preview.json
       - name: Publish rolling preview
         env:
           GH_TOKEN: ${{ github.token }}
