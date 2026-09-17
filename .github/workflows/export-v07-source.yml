@@ -1,0 +1,28 @@
+name: Export v0.7 restored source
+on:
+  push:
+    branches: [work/v0.8-reliability]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Restore verified v0.7 source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            bootstrap/v07_payload_00_0 bootstrap/v07_payload_00_1 bootstrap/v07_payload_00_2 bootstrap/v07_payload_00_3 \
+            bootstrap/v07_payload_01_0 bootstrap/v07_payload_01_1 bootstrap/v07_payload_01_2 bootstrap/v07_payload_01_3 \
+            bootstrap/v07safe_02_0 bootstrap/v07safe_02_1 bootstrap/v07safe_02_2 bootstrap/v07safe_02_3 \
+            bootstrap/v07safe_03_0 bootstrap/v07safe_03_1 bootstrap/v07safe_03_2 bootstrap/v07safe_03_3 \
+            | base64 -d > /tmp/v07.tar.xz
+          echo 'e2efec5be8b9b830e241f1d35e666e680d054b90305b5f29eaf4599ecda9993b  /tmp/v07.tar.xz' | sha256sum -c -
+          mkdir -p restored
+          tar -xJf /tmp/v07.tar.xz -C restored
+      - uses: actions/upload-artifact@v6
+        with:
+          name: v07-restored-source
+          path: restored/**
