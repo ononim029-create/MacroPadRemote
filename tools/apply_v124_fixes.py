@@ -226,7 +226,6 @@ def patch_mobile() -> None:
         final currentSubscription = subscription;
         subscription = null;
         try { await currentSubscription?.cancel(); } catch (_) {}
-        try { await widget.transport.close(); } catch (_) {}
         if (mounted) {
           Navigator.of(context, rootNavigator: true).popUntil((route) => route.isFirst);
         }
@@ -234,6 +233,13 @@ def patch_mobile() -> None:
       }
 '''
     text = replace_between(text, start, end, replacement, "force navigation after PC unlink")
+
+    text = replace_once(
+        text,
+        "      child: PopScope(\\n        canPop: false,\\n        child: Scaffold(",
+        "      child: PopScope(\\n        canPop: _remoteRevoked,\\n        child: Scaffold(",
+        "allow route pop after remote revocation",
+    )
 
     # The visible line below the workspace/page selector is never rendered.
     text = replace_once(
