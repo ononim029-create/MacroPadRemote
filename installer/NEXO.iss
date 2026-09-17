@@ -1,5 +1,5 @@
 #define MyAppName "NEXO"
-#define MyAppVersion "1.2.0-preview"
+#define MyAppVersion "1.2.3-preview"
 #define MyAppPublisher "NEXO"
 #define MyAppExeName "NEXO.exe"
 
@@ -28,9 +28,9 @@ CloseApplications=yes
 RestartApplications=no
 UsePreviousAppDir=yes
 SetupLogging=yes
-VersionInfoVersion=1.2.0.0
+VersionInfoVersion=1.2.3.0
 VersionInfoProductName=NEXO Setup
-VersionInfoProductVersion=1.2.0.0
+VersionInfoProductVersion=1.2.3.0
 VersionInfoCompany=NEXO
 VersionInfoDescription=NEXO Setup
 
@@ -52,10 +52,10 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Запустить NEXO"; Worki
 
 [Code]
 const
-  NexoBg = $001B1917;
-  NexoPanel = $00211F1D;
-  NexoText = $00F2F2F2;
-  NexoMuted = $00A8A39D;
+  NexoBg = $00FFFFFF;
+  NexoPanel = $00FFFFFF;
+  NexoText = $00202020;
+  NexoMuted = $006B6B6B;
 
 procedure InitializeWizard;
 begin
