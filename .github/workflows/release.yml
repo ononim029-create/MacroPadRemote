@@ -74,6 +74,14 @@ jobs:
           cp /tmp/v07src/mobile/pubspec.yaml src/mobile/macropad_mobile/pubspec.yaml
           mkdir -p src/mobile/macropad_mobile/lib
           cp /tmp/v07src/mobile/lib/main.dart src/mobile/macropad_mobile/lib/main.dart
+          python3 - <<'PYFIX'
+          from pathlib import Path
+          p = Path('src/mobile/macropad_mobile/lib/main.dart')
+          s = p.read_text()
+          s = s.replace('Navigator.of(this.context).pop(pc.serverId);', 'Navigator.of(context).pop(pc.serverId);')
+          s = s.replace('for (var x = 0; x < cs; x++) used[row + y][column + x] = true;', 'for (var x = 0; x < cs; x++) {\n            used[row + y][column + x] = true;\n          }')
+          p.write_text(s)
+          PYFIX
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
