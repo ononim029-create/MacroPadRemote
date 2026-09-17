@@ -1,7 +1,0 @@
-Analyzing build-mobile...                                       
-
-   info • 'translate' is deprecated and shouldn't be used. Use translateByVector3, translateByVector4, or translateByDouble instead. Try replacing the use of the deprecated member with the replacement • lib/main.dart:963:32 • deprecated_member_use
-   info • 'scale' is deprecated and shouldn't be used. Use scaleByVector3, scaleByVector4, or scaleByDouble instead. Try replacing the use of the deprecated member with the replacement • lib/main.dart:963:51 • deprecated_member_use
-
-2 issues found. (ran in 7.1s)
-ANALYZE_EXIT=1
