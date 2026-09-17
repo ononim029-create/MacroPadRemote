@@ -1,0 +1,34 @@
+name: Apply NEXO v0.10 source patch
+
+on:
+  push:
+    branches: [feature/nexo-v010-workspace-controls]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[v010-patched]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feature/nexo-v010-workspace-controls
+      - name: Apply source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat tools/v010/chunk*.txt | base64 -d | gzip -d > /tmp/patch_v010.py
+          python3 /tmp/patch_v010.py
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src
+          git diff --cached --quiet && exit 0
+          git commit -m "NEXO v0.10: workspace controls and desktop layout [v010-patched]"
+          git push
