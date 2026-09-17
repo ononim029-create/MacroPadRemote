@@ -892,6 +892,14 @@ def patch_mobile() -> None:
 '''
     text = replace_between(text, drawer_start, drawer_end, drawer, "independent additional panel switches")
 
+
+    text = replace_once(
+        text,
+        "        'hotkey' => Icons.keyboard,\n        'text' => Icons.text_fields,",
+        "        'hotkey' => Icons.keyboard,\n        'superhotkey' => Icons.flash_on,\n        'text' => Icons.text_fields,",
+        "super hotkey mobile icon",
+    )
+
     path.write_text(text, encoding="utf-8")
     print(f"Applied v1.2.4 mobile fixes: {path}")
 
