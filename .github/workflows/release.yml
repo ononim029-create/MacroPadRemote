@@ -13,30 +13,6 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Restore verified v0.7 sources
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $partNames = @(
-            'bootstrap/v07_payload_00_0','bootstrap/v07_payload_00_1','bootstrap/v07_payload_00_2','bootstrap/v07_payload_00_3',
-            'bootstrap/v07_payload_01_0','bootstrap/v07_payload_01_1','bootstrap/v07_payload_01_2','bootstrap/v07_payload_01_3',
-            'bootstrap/v07safe_02_0','bootstrap/v07safe_02_1','bootstrap/v07safe_02_2','bootstrap/v07safe_02_3',
-            'bootstrap/v07safe_03_0','bootstrap/v07safe_03_1','bootstrap/v07safe_03_2','bootstrap/v07safe_03_3'
-          )
-          $b64 = ($partNames | ForEach-Object { Get-Content $_ -Raw }) -join ''
-          $archive = Join-Path $env:RUNNER_TEMP 'v07.tar.xz'
-          [IO.File]::WriteAllBytes($archive, [Convert]::FromBase64String($b64))
-          $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
-          $expected = 'e2efec5be8b9b830e241f1d35e666e680d054b90305b5f29eaf4599ecda9993b'
-          if ($actual -ne $expected) { throw "v0.7 payload SHA256 mismatch: $actual" }
-          $src = Join-Path $env:RUNNER_TEMP 'v07src'
-          New-Item -ItemType Directory -Force $src | Out-Null
-          tar -xJf $archive -C $src
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Copy-Item "$src/windows/*" src/windows/MacroPadRemote/ -Force
-          New-Item -ItemType Directory -Force src/mobile/macropad_mobile/lib | Out-Null
-          Copy-Item "$src/mobile/pubspec.yaml" src/mobile/macropad_mobile/pubspec.yaml -Force
-          Copy-Item "$src/mobile/lib/main.dart" src/mobile/macropad_mobile/lib/main.dart -Force
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
@@ -58,30 +34,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Restore verified v0.7 sources
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat \
-            bootstrap/v07_payload_00_0 bootstrap/v07_payload_00_1 bootstrap/v07_payload_00_2 bootstrap/v07_payload_00_3 \
-            bootstrap/v07_payload_01_0 bootstrap/v07_payload_01_1 bootstrap/v07_payload_01_2 bootstrap/v07_payload_01_3 \
-            bootstrap/v07safe_02_0 bootstrap/v07safe_02_1 bootstrap/v07safe_02_2 bootstrap/v07safe_02_3 \
-            bootstrap/v07safe_03_0 bootstrap/v07safe_03_1 bootstrap/v07safe_03_2 bootstrap/v07safe_03_3 \
-            | base64 -d > /tmp/v07.tar.xz
-          echo 'e2efec5be8b9b830e241f1d35e666e680d054b90305b5f29eaf4599ecda9993b  /tmp/v07.tar.xz' | sha256sum -c -
-          rm -rf /tmp/v07src && mkdir -p /tmp/v07src
-          tar -xJf /tmp/v07.tar.xz -C /tmp/v07src
-          cp /tmp/v07src/mobile/pubspec.yaml src/mobile/macropad_mobile/pubspec.yaml
-          mkdir -p src/mobile/macropad_mobile/lib
-          cp /tmp/v07src/mobile/lib/main.dart src/mobile/macropad_mobile/lib/main.dart
-          python3 - <<'PYFIX'
-          from pathlib import Path
-          p = Path('src/mobile/macropad_mobile/lib/main.dart')
-          s = p.read_text()
-          s = s.replace('Navigator.of(this.context).pop(pc.serverId);', 'Navigator.of(context).pop(pc.serverId);')
-          s = s.replace('for (var x = 0; x < cs; x++) used[row + y][column + x] = true;', 'for (var x = 0; x < cs; x++) {\n            used[row + y][column + x] = true;\n          }')
-          p.write_text(s)
-          PYFIX
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
