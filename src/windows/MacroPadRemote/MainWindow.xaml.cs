@@ -223,12 +223,35 @@ public partial class MainWindow : Window
         if (TrustedDevicesList.SelectedItem is not TrustedClient device) return;
         if (device.IsOnline)
         {
-            MessageBox.Show(this, "Сначала отключите устройство, затем его можно забыть.", "MacroPad Remote");
+            MessageBox.Show(this, "Сначала отключите устройство, затем его можно забыть.", "NEXO");
             return;
         }
         _state.TrustedDevices.RemoveAll(x => x.Id == device.Id);
         SaveState();
         RefreshTrustedDevices();
+    }
+
+
+    private async void TrustedDeviceMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: TrustedClient device } button) return;
+        var menu = new ContextMenu();
+        var forget = new MenuItem { Header = "Забыть устройство (отключиться)" };
+        forget.Click += async (_, _) => await ForgetTrustedClientAsync(device);
+        menu.Items.Add(forget);
+        button.ContextMenu = menu; menu.PlacementTarget = button; menu.IsOpen = true; e.Handled = true;
+    }
+
+    private async Task ForgetTrustedClientAsync(TrustedClient device)
+    {
+        List<WebSocket> close = new();
+        lock (_clients)
+            foreach (var pair in _clientIds.Where(x => x.Value == device.Id).ToList()) close.Add(pair.Key);
+        foreach (var socket in close)
+            try { await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Device forgotten", CancellationToken.None); } catch { }
+        if (_bleClientId == device.Id) { _bleAuthenticated = false; _bleClientId = ""; }
+        _state.TrustedDevices.RemoveAll(x => x.Id == device.Id);
+        SaveState(); RefreshTrustedDevices(); UpdateConnectionStatus();
     }
 
     private void HeaderSettingsButton_Click(object sender, RoutedEventArgs e)
@@ -292,9 +315,9 @@ public partial class MainWindow : Window
         yield return new("Система", "T", "Текст", "Вставить заданный текст", "text", "");
         yield return new("Система", "↗", "Открыть", "Программа, файл или папка", "open", "");
         yield return new("Система", "◎", "Веб-сайт", "Открыть URL в браузере", "url", "https://");
-        yield return new("MacroPad Remote", "□", "Папка", "Открыть вложенную страницу", "folder", "");
-        yield return new("MacroPad Remote", "≡", "Multi Action", "Несколько действий по очереди", "multi", "");
-        yield return new("MacroPad Remote", "⇄", "Переключить профиль", "Активировать другой профиль", "profile", "");
+        yield return new("NEXO", "□", "Папка", "Открыть вложенную страницу", "folder", "");
+        yield return new("NEXO", "≡", "Multi Action", "Несколько действий по очереди", "multi", "");
+        yield return new("NEXO", "⇄", "Переключить профиль", "Активировать другой профиль", "profile", "");
         yield return new("Мультимедиа", "▶", "Play / Pause", "Управление воспроизведением", "media", "MEDIA_PLAY");
         yield return new("Мультимедиа", "+", "Громкость +", "Увеличить громкость", "media", "VOLUME_UP");
         yield return new("Мультимедиа", "−", "Громкость −", "Уменьшить громкость", "media", "VOLUME_DOWN");
@@ -413,7 +436,7 @@ public partial class MainWindow : Window
     private void DeletePage(DeckPage page)
     {
         if (_profile is null || _profile.Pages.Count <= 1) return;
-        if (MessageBox.Show(this, $"Удалить страницу «{page.Name}»?", "MacroPad Remote", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        if (MessageBox.Show(this, $"Удалить страницу «{page.Name}»?", "NEXO", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         var index = _profile.Pages.IndexOf(page);
         _profile.Pages.Remove(page);
         var next = _profile.Pages[Math.Clamp(index - 1, 0, _profile.Pages.Count - 1)];
@@ -465,7 +488,8 @@ public partial class MainWindow : Window
         var root = new Grid();
         var stack = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         stack.Children.Add(CreateTileIcon(tile, blank));
-        stack.Children.Add(new TextBlock { Text = tile.Title, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.SemiBold, Foreground = blank ? Brushes.Gray : Brushes.White, MaxWidth = 180 });
+        if (tile.ShowLabel)
+            stack.Children.Add(new TextBlock { Text = tile.Title, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.SemiBold, Foreground = blank ? Brushes.Gray : Brushes.White, MaxWidth = 180 });
         var actionCaption = ActionCaption(tile);
         if (!string.IsNullOrWhiteSpace(actionCaption))
             stack.Children.Add(new TextBlock { Text = actionCaption, FontSize = 9, Foreground = (Brush)FindResource("Muted"), HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 4, 0, 0), MaxWidth = 180, TextTrimming = TextTrimming.CharacterEllipsis });
@@ -513,6 +537,7 @@ public partial class MainWindow : Window
         InspectorValueBox.IsEnabled = enabled;
         InspectorHotkeyBox.IsEnabled = enabled;
         RecordHotkeyButton.IsEnabled = enabled;
+        InspectorShowLabel.IsEnabled = enabled;
 
         if (_selected is null)
         {
@@ -522,6 +547,7 @@ public partial class MainWindow : Window
             InspectorValueBox.Text = "";
             InspectorHotkeyBox.Text = "";
             InspectorValueLabel.Text = "Параметр";
+            InspectorShowLabel.IsChecked = true;
         }
         else
         {
@@ -530,6 +556,7 @@ public partial class MainWindow : Window
             InspectorTypeBox.Text = ActionTypeName(_selected.ActionType);
             InspectorValueBox.Text = _selected.ActionValue;
             InspectorHotkeyBox.Text = _selected.Hotkey;
+            InspectorShowLabel.IsChecked = _selected.ShowLabel;
             InspectorValueLabel.Text = _selected.ActionType switch
             {
                 "text" => "Текст",
@@ -642,7 +669,7 @@ public partial class MainWindow : Window
         menu.Items.Add(multi);
 
         var folder = new MenuItem { Header = "Создать папку" };
-        folder.Click += (_, _) => AssignAction(tile, new ActionItem("MacroPad Remote", "□", "Папка", "", "folder", ""));
+        folder.Click += (_, _) => AssignAction(tile, new ActionItem("NEXO", "□", "Папка", "", "folder", ""));
         folder.Click += (_, _) => { SaveAndBroadcast(); RefreshInspector(); };
         menu.Items.Add(folder);
         menu.Items.Add(new Separator());
@@ -724,6 +751,7 @@ public partial class MainWindow : Window
         if (_selected is null) return;
         _selected.Title = string.IsNullOrWhiteSpace(InspectorTitleBox.Text) ? "Кнопка" : InspectorTitleBox.Text.Trim();
         _selected.ActionValue = InspectorValueBox.Text.Trim();
+        _selected.ShowLabel = InspectorShowLabel.IsChecked != false;
         if (_selected.ActionType == "hotkey") _selected.Hotkey = InspectorHotkeyBox.Text.Trim().ToUpperInvariant();
         SaveAndBroadcast();
         RefreshInspector();
@@ -737,7 +765,7 @@ public partial class MainWindow : Window
 
     private void ClearTile(Tile tile)
     {
-        tile.Title = "Добавить"; tile.ActionType = ""; tile.ActionValue = ""; tile.Hotkey = ""; tile.IconKind = "auto"; tile.IconValue = ""; tile.ColumnSpan = tile.RowSpan = 1; tile.Steps.Clear();
+        tile.Title = "Добавить"; tile.ActionType = ""; tile.ActionValue = ""; tile.Hotkey = ""; tile.IconKind = "auto"; tile.IconValue = ""; tile.ShowLabel = true; tile.ColumnSpan = tile.RowSpan = 1; tile.Steps.Clear();
         EnsureCapacity(_page!); SaveAndBroadcast(); RefreshInspector();
     }
 
@@ -749,7 +777,7 @@ public partial class MainWindow : Window
         if (extra > 0)
         {
             var blanks = _page.Tiles.Where(x => !ReferenceEquals(x, tile) && IsBlank(x)).Take(extra).ToList();
-            if (blanks.Count < extra) { MessageBox.Show(this, "Недостаточно свободных пустых ячеек.", "MacroPad Remote"); return; }
+            if (blanks.Count < extra) { MessageBox.Show(this, "Недостаточно свободных пустых ячеек.", "NEXO"); return; }
             foreach (var blank in blanks) _page.Tiles.Remove(blank);
         }
         tile.ColumnSpan = columns; tile.RowSpan = rows; EnsureCapacity(_page); SaveAndBroadcast();
@@ -835,7 +863,7 @@ public partial class MainWindow : Window
     private void DeleteProfile_Click(object sender, RoutedEventArgs e)
     {
         if (_profile is null || _profiles.Count <= 1) return;
-        if (MessageBox.Show(this, $"Удалить профиль «{_profile.Name}»?", "MacroPad Remote", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
+        if (MessageBox.Show(this, $"Удалить профиль «{_profile.Name}»?", "NEXO", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
         _profiles.Remove(_profile); _state.ActiveProfileId = _profiles[0].Id; SaveState(); RefreshProfiles(); _ = BroadcastSnapshotAsync();
     }
 
@@ -874,7 +902,7 @@ public partial class MainWindow : Window
         _profile.Description = ProfileDescription.Text.Trim();
         var columns = int.TryParse(ColumnsBox.Text, out var c) ? Math.Clamp(c, 1, 12) : _page.Columns;
         var rows = int.TryParse(RowsBox.Text, out var r) ? Math.Clamp(r, 1, 12) : _page.Rows;
-        if (ConfiguredArea(_page) > columns * rows) { MessageBox.Show(this, "Новая сетка слишком мала для уже настроенных плиток.", "MacroPad Remote"); return; }
+        if (ConfiguredArea(_page) > columns * rows) { MessageBox.Show(this, "Новая сетка слишком мала для уже настроенных плиток.", "NEXO"); return; }
         _page.Columns = columns; _page.Rows = rows; EnsureCapacity(_page); SaveState(); RefreshProfiles(); _ = BroadcastSnapshotAsync();
     }
 
@@ -1006,7 +1034,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"Не удалось перезапустить связь.\n\n{ex.Message}", "MacroPad Remote");
+            MessageBox.Show(this, $"Не удалось перезапустить связь.\n\n{ex.Message}", "NEXO");
         }
     }
 
@@ -1323,13 +1351,13 @@ public partial class MainWindow : Window
     {
         if (SelectedTransport() == "Wifi")
         {
-            if (_server is null) { MessageBox.Show(this, "Wi‑Fi связь ещё не запущена.", "MacroPad Remote"); return; }
+            if (_server is null) { MessageBox.Show(this, "Wi‑Fi связь ещё не запущена.", "NEXO"); return; }
             ShowQr($"macropad://connect?transport=wifi&serverId={Uri.EscapeDataString(_state.ServerId)}&host={Uri.EscapeDataString(LocalIp())}&port={WebSocketPort}&token={Uri.EscapeDataString(_pairToken)}",
                 "Wi‑Fi: приложение на телефоне сначала обнаруживает этот ПК в той же сети. QR только подтверждает найденный ПК и передаёт одноразовый токен.");
         }
         else
         {
-            if (!_ble.IsRunning) { MessageBox.Show(this, "Bluetooth LE ещё не запущен.", "MacroPad Remote"); return; }
+            if (!_ble.IsRunning) { MessageBox.Show(this, "Bluetooth LE ещё не запущен.", "NEXO"); return; }
             ShowQr($"macropad://connect?transport=ble&serverId={Uri.EscapeDataString(_state.ServerId)}&service={BleGattServer.ServiceUuid:D}&token={Uri.EscapeDataString(_pairToken)}",
                 "Bluetooth LE: QR передаёт одноразовый токен авторизации, после чего телефон подключается к GATT service.");
         }
@@ -1353,7 +1381,7 @@ public partial class MainWindow : Window
         var qrBorder = new Border { Background = Brushes.White, Padding = new Thickness(12), HorizontalAlignment = HorizontalAlignment.Center };
         qrBorder.Child = new Image { Width = 290, Height = 290, Source = bitmap };
         panel.Children.Add(qrBorder);
-        panel.Children.Add(new TextBlock { Text = "Отсканируйте QR в мобильном приложении MacroPad Remote", TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 14, 0, 0) });
+        panel.Children.Add(new TextBlock { Text = "Отсканируйте QR в мобильном приложении NEXO", TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 14, 0, 0) });
         window.Content = panel; window.ShowDialog();
     }
 
@@ -1382,6 +1410,7 @@ public partial class MainWindow : Window
                     hotkey = t.Hotkey,
                     iconKind = SnapshotIconKind(t),
                     iconValue = SnapshotIconValue(t),
+                    showLabel = t.ShowLabel,
                     rowSpan = t.RowSpan,
                     columnSpan = t.ColumnSpan
                 }).ToList()
@@ -1706,6 +1735,7 @@ public sealed class Tile
     public string Hotkey { get; set; } = "";
     public string IconKind { get; set; } = "auto";
     public string IconValue { get; set; } = "";
+    public bool ShowLabel { get; set; } = true;
     public int RowSpan { get; set; } = 1;
     public int ColumnSpan { get; set; } = 1;
     public List<ActionStep> Steps { get; set; } = new();

@@ -87,7 +87,7 @@
             <Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{StaticResource Hover}"/></Trigger><Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="#303438"/><Setter Property="BorderBrush" Value="{StaticResource Blue}"/></Trigger></Style.Triggers>
         </Style>
         <Style TargetType="ContextMenu"><Setter Property="Background" Value="{StaticResource Panel2}"/><Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="BorderBrush" Value="{StaticResource Border}"/></Style>
-        <Style TargetType="MenuItem"><Setter Property="Background" Value="{StaticResource Panel2}"/><Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="Padding" Value="10,6"/></Style>
+        <Style TargetType="MenuItem"><Setter Property="Background" Value="{StaticResource Panel2}"/><Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="Padding" Value="10,6"/><Style.Triggers><Trigger Property="IsHighlighted" Value="True"><Setter Property="Background" Value="#353A3E"/><Setter Property="Foreground" Value="White"/></Trigger></Style.Triggers></Style>
         <Style TargetType="Expander"><Setter Property="Foreground" Value="{StaticResource Text}"/></Style>
         <Style TargetType="TabControl"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="{StaticResource Border}"/></Style>
         <Style TargetType="TabItem">
