@@ -1,7 +1,7 @@
 name: macropad_remote
-description: MacroPad Remote phone companion
+description: MacroPad Remote phone and tablet companion
 publish_to: 'none'
-version: 0.5.1+11
+version: 0.7.0+30
 environment:
   sdk: '>=3.8.0 <4.0.0'
 dependencies:
@@ -9,6 +9,8 @@ dependencies:
     sdk: flutter
   web_socket_channel: ^3.0.3
   mobile_scanner: ^7.4.2
+  universal_ble: ^2.3.0
+  flutter_secure_storage: ^11.1.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

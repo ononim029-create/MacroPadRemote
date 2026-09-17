@@ -12,21 +12,101 @@
         <SolidColorBrush x:Key="Muted" Color="#9DA3A8"/>
         <SolidColorBrush x:Key="Blue" Color="#1688FF"/>
         <SolidColorBrush x:Key="Green" Color="#62D16F"/>
-        <Style TargetType="Window"><Setter Property="FontFamily" Value="Segoe UI"/><Setter Property="Background" Value="{StaticResource Bg}"/><Setter Property="Foreground" Value="{StaticResource Text}"/></Style>
-        <Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource Text}"/></Style>
-        <Style TargetType="Button">
-            <Setter Property="Background" Value="{StaticResource Panel2}"/><Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="BorderBrush" Value="{StaticResource Border}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Padding" Value="10,7"/><Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="b" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="{StaticResource Hover}"/><Setter TargetName="b" Property="BorderBrush" Value="#5B6166"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="b" Property="Opacity" Value="0.75"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.42"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+        <SolidColorBrush x:Key="LightSurface" Color="#F5F5F5"/>
+        <SolidColorBrush x:Key="LightText" Color="#101214"/>
+
+        <Style TargetType="Window">
+            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="Background" Value="{StaticResource Bg}"/>
+            <Setter Property="Foreground" Value="{StaticResource Text}"/>
         </Style>
-        <Style TargetType="TextBox"><Setter Property="Background" Value="#111315"/><Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="CaretBrush" Value="White"/><Setter Property="BorderBrush" Value="{StaticResource Border}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Padding" Value="8,5"/></Style>
-        <Style TargetType="ComboBox"><Setter Property="Background" Value="#111315"/><Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="BorderBrush" Value="{StaticResource Border}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Padding" Value="6,3"/></Style>
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource Text}"/>
+        </Style>
+        <Style x:Key="LightTextStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource LightText}"/>
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource Panel2}"/>
+            <Setter Property="Foreground" Value="{StaticResource Text}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Border}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Root" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Root" Property="Background" Value="{StaticResource Hover}"/><Setter TargetName="Root" Property="BorderBrush" Value="#5B6166"/></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Root" Property="Opacity" Value="0.75"/></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.42"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="LightButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="{StaticResource LightSurface}"/>
+            <Setter Property="Foreground" Value="{StaticResource LightText}"/>
+            <Setter Property="BorderBrush" Value="#D2D2D2"/>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="#111315"/>
+            <Setter Property="Foreground" Value="{StaticResource Text}"/>
+            <Setter Property="CaretBrush" Value="White"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Border}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,5"/>
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="#111315"/>
+            <Setter Property="Foreground" Value="{StaticResource Text}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Border}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="6,3"/>
+        </Style>
+        <!-- Native combo popups are light on Windows; force dark text there. -->
+        <Style TargetType="ComboBoxItem">
+            <!-- Popup is deliberately ~20% lighter than the primary app background. -->
+            <Setter Property="Background" Value="#2C3034"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Style.Triggers>
+                <Trigger Property="IsHighlighted" Value="True"><Setter Property="Background" Value="#353A3E"/><Setter Property="Foreground" Value="White"/></Trigger>
+                <Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="#41474C"/><Setter Property="Foreground" Value="White"/></Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style TargetType="ToolTip"><Setter Property="Background" Value="White"/><Setter Property="Foreground" Value="Black"/></Style>
         <Style TargetType="CheckBox"><Setter Property="Foreground" Value="{StaticResource Text}"/></Style>
         <Style TargetType="ListBox"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Foreground" Value="{StaticResource Text}"/></Style>
-        <Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,0,2"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="3,0,0,0"/><Setter Property="BorderBrush" Value="Transparent"/><Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{StaticResource Hover}"/></Trigger><Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="#303438"/><Setter Property="BorderBrush" Value="{StaticResource Blue}"/></Trigger></Style.Triggers></Style>
+        <Style TargetType="ListBoxItem">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,0,2"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="3,0,0,0"/><Setter Property="BorderBrush" Value="Transparent"/>
+            <Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{StaticResource Hover}"/></Trigger><Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="#303438"/><Setter Property="BorderBrush" Value="{StaticResource Blue}"/></Trigger></Style.Triggers>
+        </Style>
         <Style TargetType="ContextMenu"><Setter Property="Background" Value="{StaticResource Panel2}"/><Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="BorderBrush" Value="{StaticResource Border}"/></Style>
         <Style TargetType="MenuItem"><Setter Property="Background" Value="{StaticResource Panel2}"/><Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="Padding" Value="10,6"/></Style>
         <Style TargetType="Expander"><Setter Property="Foreground" Value="{StaticResource Text}"/></Style>
         <Style TargetType="TabControl"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="{StaticResource Border}"/></Style>
-        <Style TargetType="TabItem"><Setter Property="Foreground" Value="{StaticResource Muted}"/><Setter Property="Background" Value="#202326"/><Setter Property="Padding" Value="20,9"/><Style.Triggers><Trigger Property="IsSelected" Value="True"><Setter Property="Foreground" Value="White"/><Setter Property="Background" Value="#292D30"/></Trigger></Style.Triggers></Style>
+        <Style TargetType="TabItem">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="#202326"/>
+            <Setter Property="Padding" Value="18,8"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabRoot" Background="{TemplateBinding Background}" BorderBrush="{StaticResource Border}" BorderThickness="0,0,1,1" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="TabRoot" Property="Background" Value="#2C3034"/><Setter Property="Foreground" Value="White"/></Trigger>
+                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="TabRoot" Property="Background" Value="#353A3E"/><Setter TargetName="TabRoot" Property="BorderBrush" Value="{StaticResource Blue}"/><Setter Property="Foreground" Value="White"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Application.Resources>
 </Application>
