@@ -12,7 +12,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Restore v0.6.1 Windows sources
+      - name: Restore v0.6.2 Windows sources
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -55,6 +55,9 @@ jobs:
             } finally { $gzipStream.Dispose() }
           } finally { $inputStream.Dispose() }
           git apply --whitespace=nowarn $patchFile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          git apply --whitespace=nowarn bootstrap/v062_input_fix.patch
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/setup-dotnet@v5
         with:
@@ -178,7 +181,7 @@ jobs:
           ZIP=artifacts/windows/MacroPadRemote-win-x64.zip
           SHA=$(sha256sum "$ZIP" | awk '{print $1}')
           cat > preview.json <<JSON
-          {"version":"0.6.1-preview","channel":"preview","packageUrl":"https://github.com/${GH_REPO}/releases/download/preview/MacroPadRemote-win-x64.zip","sha256":"${SHA}","mandatory":false,"notes":"v0.6.1: reachable LAN route, phone/tablet detection, desktop mobile styling, orientation control"}
+          {"version":"0.6.2-preview","channel":"preview","packageUrl":"https://github.com/${GH_REPO}/releases/download/preview/MacroPadRemote-win-x64.zip","sha256":"${SHA}","mandatory":false,"notes":"v0.6.2: Windows SendInput x64 hotfix, action diagnostics, LAN/BLE/mobile fixes"}
           JSON
       - name: Publish rolling preview
         env:
