@@ -123,7 +123,7 @@ jobs:
           ZIP=artifacts/windows/MacroPadRemote-win-x64.zip
           SHA=$(sha256sum "$ZIP" | awk '{print $1}')
           cat > preview.json <<JSON
-          {"version":"0.7.0-preview","channel":"preview","packageUrl":"https://github.com/${GH_REPO}/releases/download/preview/MacroPadRemote-win-x64.zip","sha256":"${SHA}","mandatory":false,"notes":"v0.7: trusted devices, no-repeat QR, profile/page drawer, portrait phone scaling, connection settings, action hotfix"}
+          {"version":"0.8.0-preview","channel":"preview","packageUrl":"https://github.com/${GH_REPO}/releases/download/preview/MacroPadRemote-win-x64.zip","sha256":"${SHA}","mandatory":false,"notes":"v0.8: per-macro icon library, custom image import, reusable user icons and screen-region screenshot icons synced to phone"}
           JSON
       - name: Publish rolling preview
         env:

@@ -112,6 +112,7 @@ public partial class MainWindow : Window
 
         _state.Profiles ??= new List<Profile>();
         _state.TrustedDevices ??= new List<TrustedClient>();
+        _state.IconLibrary ??= new List<IconAsset>();
         if (string.IsNullOrWhiteSpace(_state.ServerId))
             _state.ServerId = Guid.NewGuid().ToString("N");
         foreach (var device in _state.TrustedDevices)
@@ -463,7 +464,7 @@ public partial class MainWindow : Window
 
         var root = new Grid();
         var stack = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        stack.Children.Add(new TextBlock { Text = Glyph(tile), FontSize = 26, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 7), Foreground = blank ? Brushes.Gray : Brushes.White });
+        stack.Children.Add(CreateTileIcon(tile, blank));
         stack.Children.Add(new TextBlock { Text = tile.Title, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.SemiBold, Foreground = blank ? Brushes.Gray : Brushes.White, MaxWidth = 180 });
         var actionCaption = ActionCaption(tile);
         if (!string.IsNullOrWhiteSpace(actionCaption))
@@ -541,6 +542,7 @@ public partial class MainWindow : Window
             };
         }
         _updating = false;
+        RefreshIconInspector();
     }
 
     private static string ActionTypeName(string type) => type switch
@@ -735,7 +737,7 @@ public partial class MainWindow : Window
 
     private void ClearTile(Tile tile)
     {
-        tile.Title = "Добавить"; tile.ActionType = ""; tile.ActionValue = ""; tile.Hotkey = ""; tile.ColumnSpan = tile.RowSpan = 1; tile.Steps.Clear();
+        tile.Title = "Добавить"; tile.ActionType = ""; tile.ActionValue = ""; tile.Hotkey = ""; tile.IconKind = "auto"; tile.IconValue = ""; tile.ColumnSpan = tile.RowSpan = 1; tile.Steps.Clear();
         EnsureCapacity(_page!); SaveAndBroadcast(); RefreshInspector();
     }
 
@@ -1378,6 +1380,8 @@ public partial class MainWindow : Window
                     actionType = t.ActionType,
                     actionValue = t.ActionValue,
                     hotkey = t.Hotkey,
+                    iconKind = SnapshotIconKind(t),
+                    iconValue = SnapshotIconValue(t),
                     rowSpan = t.RowSpan,
                     columnSpan = t.ColumnSpan
                 }).ToList()
@@ -1670,6 +1674,7 @@ public sealed class AppState
     public string Transport { get; set; } = "Wifi";
     public List<Profile> Profiles { get; set; } = new();
     public List<TrustedClient> TrustedDevices { get; set; } = new();
+    public List<IconAsset> IconLibrary { get; set; } = new();
 }
 
 public sealed class Profile
@@ -1699,6 +1704,8 @@ public sealed class Tile
     public string ActionType { get; set; } = "";
     public string ActionValue { get; set; } = "";
     public string Hotkey { get; set; } = "";
+    public string IconKind { get; set; } = "auto";
+    public string IconValue { get; set; } = "";
     public int RowSpan { get; set; } = 1;
     public int ColumnSpan { get; set; } = 1;
     public List<ActionStep> Steps { get; set; } = new();

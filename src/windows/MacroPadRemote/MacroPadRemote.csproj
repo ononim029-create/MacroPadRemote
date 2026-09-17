@@ -8,8 +8,8 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyName>MacroPadRemote</AssemblyName>
     <Product>MacroPad Remote</Product>
-    <Version>0.7.0</Version>
-    <InformationalVersion>0.7.0-preview</InformationalVersion>
+    <Version>0.8.0</Version>
+    <InformationalVersion>0.8.0-preview</InformationalVersion>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
