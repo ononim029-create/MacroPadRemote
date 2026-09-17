@@ -52,6 +52,7 @@ public partial class MainWindow : Window
     private Point _actionDragStart;
     private Point _tileDragStart;
     private Window? _qrWindow;
+    private readonly Dictionary<string, List<ushort>> _heldRemoteKeys = new();
 
     public MainWindow()
     {
@@ -818,6 +819,50 @@ public partial class MainWindow : Window
         tile.ColumnSpan = columns; tile.RowSpan = rows; EnsureCapacity(_page); SaveAndBroadcast();
     }
 
+    private string HoldKey(string clientId, string tileId) => $"{clientId}:{tileId}";
+
+    private void StartRemoteHold(string clientId, Tile tile)
+    {
+        var hotkey = tile.ActionType == "media" ? tile.ActionValue : tile.Hotkey;
+        if (tile.ActionType == "hotkey" || tile.ActionType == "media" || (!string.IsNullOrWhiteSpace(hotkey) && string.IsNullOrWhiteSpace(tile.ActionType)))
+        {
+            var keys = HotkeyVirtualKeys(hotkey);
+            if (keys.Count == 0) return;
+            var key = HoldKey(clientId, tile.Id);
+            if (_heldRemoteKeys.ContainsKey(key)) return;
+            SendInputs(keys.Select(vk => KeyInput(vk, false)).ToArray());
+            _heldRemoteKeys[key] = keys;
+            DeviceStatus.Text = $"Удерживается: {tile.Title}";
+            return;
+        }
+
+        _ = ExecuteTileAsync(tile);
+    }
+
+    private void EndRemoteHold(string clientId, string tileId)
+    {
+        var key = HoldKey(clientId, tileId);
+        if (!_heldRemoteKeys.Remove(key, out var keys)) return;
+        SendInputs(keys.AsEnumerable().Reverse().Select(vk => KeyInput(vk, true)).ToArray());
+        DeviceStatus.Text = "Удержание завершено";
+    }
+
+    private void ReleaseRemoteHolds(string clientId)
+    {
+        foreach (var key in _heldRemoteKeys.Keys.Where(k => k.StartsWith(clientId + ":", StringComparison.Ordinal)).ToList())
+        {
+            if (!_heldRemoteKeys.Remove(key, out var keys)) continue;
+            try { SendInputs(keys.AsEnumerable().Reverse().Select(vk => KeyInput(vk, true)).ToArray()); } catch { }
+        }
+    }
+
+    private static List<ushort> HotkeyVirtualKeys(string hotkey)
+    {
+        if (string.IsNullOrWhiteSpace(hotkey)) return new List<ushort>();
+        return hotkey.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(TokenToVk).Where(vk => vk != 0).ToList();
+    }
+
     private async Task ExecuteTileAsync(Tile tile)
     {
         try
@@ -1193,7 +1238,11 @@ public partial class MainWindow : Window
                 _clientIds.Remove(socket);
                 stillOnline = _clientIds.Values.Any(x => x == clientId);
             }
-            if (!stillOnline) MarkTrustedClient(clientId, false, "Wi‑Fi");
+            if (!stillOnline)
+            {
+                Dispatcher.Invoke(() => ReleaseRemoteHolds(clientId));
+                MarkTrustedClient(clientId, false, "Wi‑Fi");
+            }
             Dispatcher.Invoke(UpdateConnectionStatus);
         }
     }
@@ -1310,20 +1359,30 @@ public partial class MainWindow : Window
                 return;
             }
 
-            if ((messageType == "press" || messageType == "longPress") && root.TryGetProperty("tileId", out var tileIdProp))
+            if ((messageType == "press" || messageType == "longPressStart" || messageType == "longPressEnd") && root.TryGetProperty("tileId", out var tileIdProp))
             {
-                var tileId = tileIdProp.GetString();
+                var tileId = tileIdProp.GetString() ?? "";
                 var tile = _state.Profiles.SelectMany(p => p.Pages).SelectMany(p => p.Tiles).FirstOrDefault(t => t.Id == tileId);
-                if (tile is not null)
-                {
-                    Dispatcher.Invoke(() => DeviceStatus.Text = $"Команда получена: {tile.Title}");
-                    var executeTask = await Dispatcher.InvokeAsync(() => ExecuteTileAsync(tile));
-                    await executeTask;
-                }
-                else
+                if (tile is null)
                 {
                     Dispatcher.Invoke(() => DeviceStatus.Text = $"Команда не найдена: {tileId}");
+                    return;
                 }
+
+                if (messageType == "longPressStart")
+                {
+                    await Dispatcher.InvokeAsync(() => StartRemoteHold(clientId, tile));
+                    return;
+                }
+                if (messageType == "longPressEnd")
+                {
+                    await Dispatcher.InvokeAsync(() => EndRemoteHold(clientId, tile.Id));
+                    return;
+                }
+
+                Dispatcher.Invoke(() => DeviceStatus.Text = $"Команда получена: {tile.Title}");
+                var executeTask = await Dispatcher.InvokeAsync(() => ExecuteTileAsync(tile));
+                await executeTask;
                 return;
             }
 

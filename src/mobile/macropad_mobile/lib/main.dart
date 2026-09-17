@@ -929,10 +929,17 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
     } catch (_) {}
   }
 
-  Future<void> _sendTile(TileSnapshot tile, {bool longPress = false}) async {
-    await HapticFeedback.selectionClick();
-    await widget.transport.send({'type': longPress ? 'longPress' : 'press', 'tileId': tile.id});
+  Future<void> _sendTile(TileSnapshot tile) async {
+    await HapticFeedback.lightImpact();
+    await widget.transport.send({'type': 'press', 'tileId': tile.id});
   }
+
+  Future<void> _startLongPress(TileSnapshot tile) async {
+    await HapticFeedback.mediumImpact();
+    await widget.transport.send({'type': 'longPressStart', 'tileId': tile.id});
+  }
+
+  Future<void> _endLongPress(TileSnapshot tile) => widget.transport.send({'type': 'longPressEnd', 'tileId': tile.id});
   Future<void> _sendHotkey(String hotkey) => widget.transport.send({'type': 'hotkey', 'hotkey': hotkey});
   Future<void> _switchProfile(String profileId) => widget.transport.send({'type': 'switchProfile', 'profileId': profileId, 'force': true});
   Future<void> _switchPage(String pageId) => widget.transport.send({'type': 'switchPage', 'pageId': pageId});
@@ -1214,9 +1221,11 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
     return Material(
       color: blank ? mpPanel : mpPanel2,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: BorderSide(color: mpBorder, width: 1)),
-      child: InkWell(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: blank ? null : () => _sendTile(tile),
-        onLongPress: blank ? null : () => _sendTile(tile, longPress: true),
+        onLongPressStart: blank ? null : (_) => _startLongPress(tile),
+        onLongPressEnd: blank ? null : (_) => _endLongPress(tile),
         child: Padding(
           padding: EdgeInsets.all(padding),
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
