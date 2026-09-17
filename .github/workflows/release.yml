@@ -1,10 +1,12 @@
 name: Build NEXO
+
 on:
   workflow_dispatch:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
 permissions:
   contents: write
 
@@ -20,14 +22,20 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          dotnet publish src/windows/MacroPadRemote/MacroPadRemote.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist/windows
+          $iconBase64 = (Get-Content 'src/windows/MacroPadRemote/Nexo.ico.b64' -Raw).Trim()
+          [IO.File]::WriteAllBytes('src/windows/MacroPadRemote/Nexo.ico', [Convert]::FromBase64String($iconBase64))
+          dotnet publish src/windows/MacroPadRemote/MacroPadRemote.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:ApplicationIcon=Nexo.ico -o dist/windows
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item dist/windows/NEXO.exe dist/NEXO.exe -Force
+          Copy-Item installer/NEXO-Setup.bat dist/NEXO-Setup.bat -Force
           Compress-Archive -Path dist/windows/* -DestinationPath dist/NEXO-win-x64.zip -Force
       - uses: actions/upload-artifact@v6
         with:
           name: NEXO-win-x64
           path: |
             dist/NEXO-win-x64.zip
+            dist/NEXO.exe
+            dist/NEXO-Setup.bat
             dist/windows/**
 
   android:
@@ -46,10 +54,13 @@ jobs:
           cp src/mobile/macropad_mobile/pubspec.yaml build-mobile/pubspec.yaml
           cp src/mobile/macropad_mobile/lib/main.dart build-mobile/lib/main.dart
           rm -rf build-mobile/test
+          mkdir -p build-mobile/android/app/src/main/kotlin/com/example/nexo
+          mkdir -p build-mobile/android/app/src/main/res/drawable
+          cp src/mobile/android_host/MainActivity.kt build-mobile/android/app/src/main/kotlin/com/example/nexo/MainActivity.kt
+          cp src/mobile/android_host/nexo_icon.xml build-mobile/android/app/src/main/res/drawable/nexo_icon.xml
           python3 - <<'PY'
           from pathlib import Path
           import re
-
           manifest = Path('build-mobile/android/app/src/main/AndroidManifest.xml')
           s = manifest.read_text()
           marker = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
@@ -65,7 +76,7 @@ jobs:
               '    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>',
               '    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30"/>'
           ]
-          missing = [x for x in perms if x.split('android:name="',1)[1].split('"',1)[0] not in s]
+          missing = [x for x in perms if x.split('android:name="', 1)[1].split('"', 1)[0] not in s]
           if missing:
               s = s.replace(marker, marker + '\n' + '\n'.join(missing))
           if 'android:usesCleartextTraffic=' not in s:
@@ -75,22 +86,8 @@ jobs:
           if 'android:roundIcon=' not in s:
               s = s.replace('<application ', '<application android:roundIcon="@drawable/nexo_icon" ', 1)
           manifest.write_text(s)
-
           gradle = Path('build-mobile/android/app/build.gradle.kts')
-          g = gradle.read_text().replace('minSdk = flutter.minSdkVersion', 'minSdk = 24')
-          gradle.write_text(g)
-
-          drawable = Path('build-mobile/android/app/src/main/res/drawable')
-          drawable.mkdir(parents=True, exist_ok=True)
-          (drawable / 'nexo_icon.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp" android:height="108dp"
-              android:viewportWidth="108" android:viewportHeight="108">
-              <path android:fillColor="#121416" android:pathData="M0,0 H108 V108 H0 Z"/>
-              <path android:fillColor="#1688FF" android:pathData="M18,18 H48 V48 H18 Z"/>
-              <path android:fillColor="#F2F2F2" android:pathData="M60,18 H90 V48 H60 Z M18,60 H48 V90 H18 Z"/>
-              <path android:fillColor="#24272A" android:strokeColor="#F2F2F2" android:strokeWidth="3" android:pathData="M60,60 H90 V90 H60 Z"/>
-          </vector>''')
+          gradle.write_text(gradle.read_text().replace('minSdk = flutter.minSdkVersion', 'minSdk = 24'))
           PY
       - name: Analyze and build APK
         shell: bash
@@ -125,9 +122,7 @@ jobs:
         run: |
           ZIP=artifacts/windows/NEXO-win-x64.zip
           SHA=$(sha256sum "$ZIP" | awk '{print $1}')
-          cat > preview.json <<JSON
-          {"version":"1.0.0-preview","channel":"preview","packageUrl":"https://github.com/${GH_REPO}/releases/download/preview/NEXO-win-x64.zip","sha256":"${SHA}","mandatory":false,"notes":"NEXO v1.0: centered landscape fit, forced profile switching, haptics and long press, collapsible landscape navigation, independent scale/pan locks, tile reorder, reorganized properties and device settings"}
-          JSON
+          printf '%s\n' "{\"version\":\"1.1.0-preview\",\"channel\":\"preview\",\"packageUrl\":\"https://github.com/${GH_REPO}/releases/download/preview/NEXO-win-x64.zip\",\"sha256\":\"${SHA}\",\"mandatory\":false,\"notes\":\"NEXO v1.1: tablet keyboard, physical-keyboard detection, startup animations, Windows tray background mode, standalone EXE and BAT installer\"}" > preview.json
       - name: Publish rolling preview
         env:
           GH_TOKEN: ${{ github.token }}
@@ -138,6 +133,8 @@ jobs:
           fi
           gh release upload preview \
             artifacts/windows/NEXO-win-x64.zip \
+            artifacts/windows/NEXO.exe \
+            artifacts/windows/NEXO-Setup.bat \
             artifacts/android/NEXO-android.apk \
             preview.json \
             --clobber \
