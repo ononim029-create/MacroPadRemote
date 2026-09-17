@@ -17,13 +17,15 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $parts = Get-ChildItem bootstrap/v07_payload_* | Sort-Object Name
+          $parts = Get-ChildItem bootstrap/v07_payload_?? | Sort-Object Name
+          if ($parts.Count -ne 4) { throw "Expected 4 v0.7 payload parts, found $($parts.Count)" }
           $b64 = ($parts | ForEach-Object { Get-Content $_.FullName -Raw }) -join ''
           $archive = Join-Path $env:RUNNER_TEMP 'v07.tar.xz'
           [IO.File]::WriteAllBytes($archive, [Convert]::FromBase64String($b64))
           $src = Join-Path $env:RUNNER_TEMP 'v07src'
           New-Item -ItemType Directory -Force $src | Out-Null
           tar -xJf $archive -C $src
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item "$src/windows/*" src/windows/MacroPadRemote/ -Force
           New-Item -ItemType Directory -Force src/mobile/macropad_mobile/lib | Out-Null
           Copy-Item "$src/mobile/pubspec.yaml" src/mobile/macropad_mobile/pubspec.yaml -Force
@@ -53,7 +55,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat bootstrap/v07_payload_* | base64 -d > /tmp/v07.tar.xz
+          parts=(bootstrap/v07_payload_[0-9][0-9])
+          if [ "${#parts[@]}" -ne 4 ]; then
+            echo "Expected 4 v0.7 payload parts, found ${#parts[@]}" >&2
+            exit 1
+          fi
+          cat "${parts[@]}" | base64 -d > /tmp/v07.tar.xz
           rm -rf /tmp/v07src && mkdir -p /tmp/v07src
           tar -xJf /tmp/v07.tar.xz -C /tmp/v07src
           cp /tmp/v07src/mobile/pubspec.yaml src/mobile/macropad_mobile/pubspec.yaml
