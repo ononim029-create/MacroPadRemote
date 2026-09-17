@@ -6,6 +6,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AssemblyName>NEXO-Setup</AssemblyName>
     <Product>NEXO Setup</Product>
     <Version>1.1.0</Version>
@@ -14,4 +15,7 @@
     <InformationalVersion>1.1.0-preview</InformationalVersion>
     <ApplicationIcon>Nexo.ico</ApplicationIcon>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="InstallerApp.cs" />
+  </ItemGroup>
 </Project>
