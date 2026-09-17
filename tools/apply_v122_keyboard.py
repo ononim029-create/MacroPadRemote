@@ -52,7 +52,7 @@ class _TabletRemoteKeyboard extends StatelessWidget {
   static const _rows = <List<_KeyboardKeySpec>>[
     [
       _KeyboardKeySpec('ESC', 'Esc', flex: 13),
-      _KeyboardKeySpec('GRAVE', '\`', ru: 'Ё', enShift: '~'),
+      _KeyboardKeySpec('GRAVE', '`', ru: 'Ё', enShift: '~'),
       _KeyboardKeySpec('1', '1', enShift: '!', ruShift: '!'),
       _KeyboardKeySpec('2', '2', enShift: '@', ruShift: '"'),
       _KeyboardKeySpec('3', '3', enShift: '#', ruShift: '№'),
@@ -137,7 +137,7 @@ class _TabletRemoteKeyboard extends StatelessWidget {
       token == 'CTRL' || token == 'ALT' || token == 'SHIFT' || token == 'WIN';
 
   String _primary(_KeyboardKeySpec spec) {
-    if (spec.token == 'LANG') return '🌐 \${languageCode.toUpperCase()}';
+    if (spec.token == 'LANG') return '🌐 ${languageCode.toUpperCase()}';
     if (spec.token == 'SPACE') return '';
     if (_isRu && spec.ru.isNotEmpty) return spec.ru;
     return spec.en;
