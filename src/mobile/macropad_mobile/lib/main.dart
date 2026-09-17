@@ -957,10 +957,10 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
     if (viewport.width <= 0 || viewport.height <= 0 || canvas.width <= 0 || canvas.height <= 0) return Matrix4.identity();
     final sx = max(0.05, (viewport.width - 16) / canvas.width);
     final sy = max(0.05, (viewport.height - 16) / canvas.height);
-    final scale = min(1.0, min(sx, sy)).clamp(.20, 1.0).toDouble();
+    final scale = min(1.0, min(sx, sy)).clamp(.05, 1.0).toDouble();
     final tx = (viewport.width - canvas.width * scale) / 2;
     final ty = (viewport.height - canvas.height * scale) / 2;
-    return Matrix4.identity()..translate(tx, ty)..scale(scale);
+    return Matrix4.identity()..translateByDouble(tx, ty, 0, 1)..scaleByDouble(scale, scale, scale, 1);
   }
 
   void _animateDeckTo(Matrix4 target, {bool animate = true}) {
@@ -1250,7 +1250,7 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
               transformationController: _deckTransform,
               panEnabled: !panLocked,
               scaleEnabled: !scaleLocked,
-              minScale: .20,
+              minScale: .05,
               maxScale: 3.2,
               boundaryMargin: const EdgeInsets.all(900),
               constrained: false,
