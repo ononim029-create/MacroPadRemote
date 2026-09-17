@@ -20,14 +20,48 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          dotnet publish src/windows/MacroPadRemote/MacroPadRemote.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist/windows
+          $icon = 'AAABAAEAICAAAAAAIACvAAAAFgAAAIlQTkcNChoKAAAADUlIRFIAAAAgAAAAIAgGAAAAc3p69AAAAHZJREFUeJxjFBIR+88wgIBpIC0fdcCgcAALVsGSl0Rp/tMjzsDAwMDw4N4dotQrKKlgiA14CIw6YNQBow4YdQDjiK+OsdYFpJbtlNQFWB1ADjAytcArf+70CaziAx4Fow4YdcCoA6hWDuDK54TAaF0w6oABdwAApPAVWO2My5AAAAAASUVORK5CYII='
+          [IO.File]::WriteAllBytes('src/windows/MacroPadRemote/Nexo.ico', [Convert]::FromBase64String($icon))
+          dotnet publish src/windows/MacroPadRemote/MacroPadRemote.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:ApplicationIcon=Nexo.ico -o dist/windows
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item dist/windows/NEXO.exe dist/NEXO.exe -Force
           Compress-Archive -Path dist/windows/* -DestinationPath dist/NEXO-win-x64.zip -Force
+          $bat = @'
+          @echo off
+          setlocal EnableExtensions
+          title NEXO Setup
+          echo.
+          echo ==============================
+          echo        NEXO Setup v1.1
+          echo ==============================
+          echo.
+          set "DEFAULT_DIR=%LOCALAPPDATA%\NEXO"
+          set /p "INSTALL_DIR=Install folder [%DEFAULT_DIR%]: "
+          if not defined INSTALL_DIR set "INSTALL_DIR=%DEFAULT_DIR%"
+          echo.
+          echo Downloading NEXO...
+          powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $d=$env:INSTALL_DIR; $u='https://github.com/ononim029-create/MacroPadRemote/releases/download/preview/NEXO-win-x64.zip'; $z=Join-Path $env:TEMP 'NEXO-win-x64.zip'; Invoke-WebRequest -UseBasicParsing $u -OutFile $z; if(Test-Path $d){Remove-Item $d -Recurse -Force}; New-Item -ItemType Directory -Force $d | Out-Null; Expand-Archive $z $d -Force; Remove-Item $z -Force"
+          if errorlevel 1 goto :fail
+          set /p "SHORTCUT=Create desktop shortcut? [Y/n]: "
+          if /I not "%SHORTCUT%"=="n" powershell -NoProfile -ExecutionPolicy Bypass -Command "$d=$env:INSTALL_DIR; $ws=New-Object -ComObject WScript.Shell; $s=$ws.CreateShortcut([Environment]::GetFolderPath('Desktop')+'\NEXO.lnk'); $s.TargetPath=Join-Path $d 'NEXO.exe'; $s.WorkingDirectory=$d; $s.Description='NEXO'; $s.Save()"
+          echo.
+          echo NEXO installed to: %INSTALL_DIR%
+          set /p "RUN=Launch NEXO now? [Y/n]: "
+          if /I not "%RUN%"=="n" start "" "%INSTALL_DIR%\NEXO.exe"
+          exit /b 0
+          :fail
+          echo Installation failed. Check internet connection and permissions.
+          pause
+          exit /b 1
+          '@
+          Set-Content -Path dist/NEXO-Setup.bat -Value $bat -Encoding ASCII
       - uses: actions/upload-artifact@v6
         with:
           name: NEXO-win-x64
           path: |
             dist/NEXO-win-x64.zip
+            dist/NEXO.exe
+            dist/NEXO-Setup.bat
             dist/windows/**
 
   android:
@@ -80,6 +114,50 @@ jobs:
           g = gradle.read_text().replace('minSdk = flutter.minSdkVersion', 'minSdk = 24')
           gradle.write_text(g)
 
+          main_activity = Path('build-mobile/android/app/src/main/kotlin/com/example/nexo/MainActivity.kt')
+          main_activity.parent.mkdir(parents=True, exist_ok=True)
+          main_activity.write_text(r'''package com.example.nexo
+
+import android.content.Context
+import android.hardware.input.InputManager
+import android.view.InputDevice
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+
+class MainActivity : FlutterActivity(), InputManager.InputDeviceListener {
+    private val channelName = "nexo/device"
+    private lateinit var inputManager: InputManager
+    private var channel: MethodChannel? = null
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        inputManager = getSystemService(Context.INPUT_SERVICE) as InputManager
+        inputManager.registerInputDeviceListener(this, null)
+        channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
+        channel?.setMethodCallHandler { call, result ->
+            if (call.method == "hasHardwareKeyboard") result.success(hasHardwareKeyboard()) else result.notImplemented()
+        }
+    }
+
+    private fun hasHardwareKeyboard(): Boolean = InputDevice.getDeviceIds().any { id ->
+        val device = InputDevice.getDevice(id) ?: return@any false
+        !device.isVirtual &&
+            device.keyboardType == InputDevice.KEYBOARD_TYPE_ALPHABETIC &&
+            (device.sources and InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD
+    }
+
+    private fun publishKeyboardState() { channel?.invokeMethod("hardwareKeyboardChanged", hasHardwareKeyboard()) }
+    override fun onInputDeviceAdded(deviceId: Int) = publishKeyboardState()
+    override fun onInputDeviceRemoved(deviceId: Int) = publishKeyboardState()
+    override fun onInputDeviceChanged(deviceId: Int) = publishKeyboardState()
+    override fun onDestroy() {
+        if (::inputManager.isInitialized) inputManager.unregisterInputDeviceListener(this)
+        super.onDestroy()
+    }
+}
+''')
+
           drawable = Path('build-mobile/android/app/src/main/res/drawable')
           drawable.mkdir(parents=True, exist_ok=True)
           (drawable / 'nexo_icon.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
@@ -126,7 +204,7 @@ jobs:
           ZIP=artifacts/windows/NEXO-win-x64.zip
           SHA=$(sha256sum "$ZIP" | awk '{print $1}')
           cat > preview.json <<JSON
-          {"version":"1.0.0-preview","channel":"preview","packageUrl":"https://github.com/${GH_REPO}/releases/download/preview/NEXO-win-x64.zip","sha256":"${SHA}","mandatory":false,"notes":"NEXO v1.0: centered landscape fit, forced profile switching, haptics and long press, collapsible landscape navigation, independent scale/pan locks, tile reorder, reorganized properties and device settings"}
+          {"version":"1.1.0-preview","channel":"preview","packageUrl":"https://github.com/${GH_REPO}/releases/download/preview/NEXO-win-x64.zip","sha256":"${SHA}","mandatory":false,"notes":"NEXO v1.1: tablet mode with scalable remote keyboard and physical-keyboard detection, unified startup animation/icon, stability pass, standalone EXE and BAT installer"}
           JSON
       - name: Publish rolling preview
         env:
@@ -138,6 +216,8 @@ jobs:
           fi
           gh release upload preview \
             artifacts/windows/NEXO-win-x64.zip \
+            artifacts/windows/NEXO.exe \
+            artifacts/windows/NEXO-Setup.bat \
             artifacts/android/NEXO-android.apk \
             preview.json \
             --clobber \
