@@ -25,6 +25,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/apply_v12_integration.py windows
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/apply_v122_profile_switch.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Publish Windows x64 and native installer
         shell: pwsh
         run: |
@@ -69,7 +71,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-      - name: Apply v1.2.1 mobile patches
+      - name: Apply v1.2.2 mobile patches
         shell: bash
         run: |
           set -euo pipefail
@@ -78,6 +80,8 @@ jobs:
           python3 tools/fix_v12_flutter.py
           python3 tools/apply_v121_fixes.py mobile
           python3 tools/fix_v121_layout.py
+          python3 tools/apply_v122_keyboard.py
+          python3 tools/apply_v122_profile_mobile.py
       - name: Create Android host
         shell: bash
         run: |
@@ -156,7 +160,7 @@ jobs:
         run: |
           ZIP=artifacts/windows/NEXO-win-x64.zip
           SHA=$(sha256sum "$ZIP" | awk '{print $1}')
-          printf '%s\n' "{\"version\":\"1.2.1-preview\",\"channel\":\"preview\",\"packageUrl\":\"https://github.com/${GH_REPO}/releases/download/preview/NEXO-win-x64.zip\",\"sha256\":\"${SHA}\",\"mandatory\":false,\"notes\":\"NEXO v1.2.1: native physical keyboard forwarding, draggable locked controls and gapless resizable bottom panels\"}" > preview.json
+          printf '%s\n' "{\"version\":\"1.2.2-preview\",\"channel\":\"preview\",\"packageUrl\":\"https://github.com/${GH_REPO}/releases/download/preview/NEXO-win-x64.zip\",\"sha256\":\"${SHA}\",\"mandatory\":false,\"notes\":\"NEXO v1.2.2: clean EN/RU keyboard legends, QWERTY Shift symbols and fixed phone profile switching\"}" > preview.json
       - name: Publish rolling preview
         env:
           GH_TOKEN: ${{ github.token }}
