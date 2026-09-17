@@ -77,6 +77,7 @@ jobs:
           python3 tools/apply_v12_integration.py mobile
           python3 tools/fix_v12_flutter.py
           python3 tools/apply_v121_fixes.py mobile
+          python3 tools/fix_v121_layout.py
       - name: Create Android host
         shell: bash
         run: |
