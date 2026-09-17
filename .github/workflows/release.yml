@@ -13,15 +13,22 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Restore v0.7 sources
+      - name: Restore verified v0.7 sources
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $parts = Get-ChildItem bootstrap/v07_payload_?? | Sort-Object Name
-          if ($parts.Count -ne 4) { throw "Expected 4 v0.7 payload parts, found $($parts.Count)" }
-          $b64 = ($parts | ForEach-Object { Get-Content $_.FullName -Raw }) -join ''
+          $partNames = @(
+            'bootstrap/v07_payload_00_0','bootstrap/v07_payload_00_1','bootstrap/v07_payload_00_2','bootstrap/v07_payload_00_3',
+            'bootstrap/v07_payload_01_0','bootstrap/v07_payload_01_1','bootstrap/v07_payload_01_2','bootstrap/v07_payload_01_3',
+            'bootstrap/v07safe_02_0','bootstrap/v07safe_02_1','bootstrap/v07safe_02_2','bootstrap/v07safe_02_3',
+            'bootstrap/v07safe_03_0','bootstrap/v07safe_03_1','bootstrap/v07safe_03_2','bootstrap/v07safe_03_3'
+          )
+          $b64 = ($partNames | ForEach-Object { Get-Content $_ -Raw }) -join ''
           $archive = Join-Path $env:RUNNER_TEMP 'v07.tar.xz'
           [IO.File]::WriteAllBytes($archive, [Convert]::FromBase64String($b64))
+          $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+          $expected = 'e2efec5be8b9b830e241f1d35e666e680d054b90305b5f29eaf4599ecda9993b'
+          if ($actual -ne $expected) { throw "v0.7 payload SHA256 mismatch: $actual" }
           $src = Join-Path $env:RUNNER_TEMP 'v07src'
           New-Item -ItemType Directory -Force $src | Out-Null
           tar -xJf $archive -C $src
@@ -51,16 +58,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Restore v0.7 sources
+      - name: Restore verified v0.7 sources
         shell: bash
         run: |
           set -euo pipefail
-          parts=(bootstrap/v07_payload_[0-9][0-9])
-          if [ "${#parts[@]}" -ne 4 ]; then
-            echo "Expected 4 v0.7 payload parts, found ${#parts[@]}" >&2
-            exit 1
-          fi
-          cat "${parts[@]}" | base64 -d > /tmp/v07.tar.xz
+          cat \
+            bootstrap/v07_payload_00_0 bootstrap/v07_payload_00_1 bootstrap/v07_payload_00_2 bootstrap/v07_payload_00_3 \
+            bootstrap/v07_payload_01_0 bootstrap/v07_payload_01_1 bootstrap/v07_payload_01_2 bootstrap/v07_payload_01_3 \
+            bootstrap/v07safe_02_0 bootstrap/v07safe_02_1 bootstrap/v07safe_02_2 bootstrap/v07safe_02_3 \
+            bootstrap/v07safe_03_0 bootstrap/v07safe_03_1 bootstrap/v07safe_03_2 bootstrap/v07safe_03_3 \
+            | base64 -d > /tmp/v07.tar.xz
+          echo 'e2efec5be8b9b830e241f1d35e666e680d054b90305b5f29eaf4599ecda9993b  /tmp/v07.tar.xz' | sha256sum -c -
           rm -rf /tmp/v07src && mkdir -p /tmp/v07src
           tar -xJf /tmp/v07.tar.xz -C /tmp/v07src
           cp /tmp/v07src/mobile/pubspec.yaml src/mobile/macropad_mobile/pubspec.yaml
