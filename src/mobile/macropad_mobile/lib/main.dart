@@ -835,7 +835,10 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
   String? connectionError;
   String serverId = '';
   String serverName = '';
-  bool viewLocked = true;
+  bool scaleLocked = false;
+  bool panLocked = false;
+  bool bottomNavVisible = false;
+  Orientation? _lastOrientation;
   final TransformationController _deckTransform = TransformationController();
   late final AnimationController _deckReturnController;
   Animation<Matrix4>? _deckReturnAnimation;
@@ -926,19 +929,39 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
     } catch (_) {}
   }
 
-  Future<void> _sendTile(TileSnapshot tile) => widget.transport.send({'type': 'press', 'tileId': tile.id});
+  Future<void> _sendTile(TileSnapshot tile) async {
+    await HapticFeedback.lightImpact();
+    await widget.transport.send({'type': 'press', 'tileId': tile.id});
+  }
+
+  Future<void> _startLongPress(TileSnapshot tile) async {
+    await HapticFeedback.mediumImpact();
+    await widget.transport.send({'type': 'longPressStart', 'tileId': tile.id});
+  }
+
+  Future<void> _endLongPress(TileSnapshot tile) => widget.transport.send({'type': 'longPressEnd', 'tileId': tile.id});
   Future<void> _sendHotkey(String hotkey) => widget.transport.send({'type': 'hotkey', 'hotkey': hotkey});
-  Future<void> _switchProfile(String profileId) => widget.transport.send({'type': 'switchProfile', 'profileId': profileId});
+  Future<void> _switchProfile(String profileId) => widget.transport.send({'type': 'switchProfile', 'profileId': profileId, 'force': true});
   Future<void> _switchPage(String pageId) => widget.transport.send({'type': 'switchPage', 'pageId': pageId});
 
-  void _toggleViewLock() {
-    final next = !viewLocked;
-    setState(() => viewLocked = next);
-    if (next) {
-      _deckReturnController.stop();
-      _deckReturnAnimation = Matrix4Tween(begin: _deckTransform.value.clone(), end: Matrix4.identity()).animate(CurvedAnimation(parent: _deckReturnController, curve: Curves.easeOutCubic));
-      _deckReturnController.forward(from: 0);
+  void _toggleScaleLock() => setState(() => scaleLocked = !scaleLocked);
+  void _togglePanLock() => setState(() => panLocked = !panLocked);
+  void _fitDeck() {
+    _deckReturnController.stop();
+    _deckReturnAnimation = Matrix4Tween(begin: _deckTransform.value.clone(), end: Matrix4.identity())
+        .animate(CurvedAnimation(parent: _deckReturnController, curve: Curves.easeOutCubic));
+    _deckReturnController.forward(from: 0);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final o = MediaQuery.orientationOf(context);
+    if (_lastOrientation != null && _lastOrientation != o) {
+      WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _fitDeck(); });
+      if (o == Orientation.landscape) bottomNavVisible = false;
     }
+    _lastOrientation = o;
   }
 
   Future<void> _forgetCurrentDevice() async {
@@ -971,15 +994,33 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
           titleSpacing: compact ? 8 : null,
           title: Row(mainAxisSize: MainAxisSize.min, children: [MacroPadMark(size: compact ? 17 : 22), SizedBox(width: compact ? 6 : 9), Flexible(child: Text(profile?.name ?? 'NEXO', overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: compact ? 13 : null)))]),
           actions: [
-            IconButton(tooltip: viewLocked ? 'Разблокировать вид' : 'Заблокировать вид', visualDensity: compact ? VisualDensity.compact : VisualDensity.standard, onPressed: _toggleViewLock, icon: Icon(viewLocked ? Icons.lock : Icons.lock_open, size: compact ? 19 : 23)),
             IconButton(tooltip: 'Повернуть экран', visualDensity: compact ? VisualDensity.compact : VisualDensity.standard, onPressed: () => toggleScreenOrientation(context), icon: Icon(Icons.screen_rotation, size: compact ? 19 : 23)),
             Padding(padding: EdgeInsets.only(right: compact ? 5 : 10), child: Center(child: Row(children: [Icon(Icons.circle, size: 7, color: connectionError == null && status != 'Отключено' ? mpGreen : mpMuted), const SizedBox(width: 5), if (!compact) Text(status, style: const TextStyle(fontSize: 11))]))),
           ],
         ),
-        body: SafeArea(child: connectionError == null ? pages[tab] : _connectionErrorView()),
-        bottomNavigationBar: connectionError == null ? _SharpBottomNav(compact: compact, selectedIndex: tab, onSelected: (value) => setState(() => tab = value), items: const [_SharpNavItem(Icons.grid_view, 'Deck'), _SharpNavItem(Icons.play_circle_outline, 'Media')]) : null,
+        body: SafeArea(child: connectionError == null ? _workspaceBody(pages, compact) : _connectionErrorView()),
+        bottomNavigationBar: connectionError == null && !compact ? _SharpBottomNav(compact: false, selectedIndex: tab, onSelected: (value) => setState(() => tab = value), items: const [_SharpNavItem(Icons.grid_view, 'Deck'), _SharpNavItem(Icons.play_circle_outline, 'Media')]) : null,
       ),
     );
+  }
+
+
+  Widget _workspaceBody(List<Widget> pages, bool compact) {
+    if (!compact) return pages[tab];
+    return Stack(children: [
+      Positioned.fill(child: pages[tab]),
+      if (bottomNavVisible)
+        Positioned(left: 18, right: 18, bottom: 26, child: ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: _SharpBottomNav(compact: true, selectedIndex: tab, onSelected: (value) => setState(() => tab = value), items: const [_SharpNavItem(Icons.grid_view, 'Deck'), _SharpNavItem(Icons.play_circle_outline, 'Media')]),
+        )),
+      Positioned(left: 0, right: 0, bottom: 2, child: Center(child: Material(
+        color: mpPanel2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: mpBorder)),
+        child: InkWell(borderRadius: BorderRadius.circular(12), onTap: () => setState(() => bottomNavVisible = !bottomNavVisible),
+          child: Padding(padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 3), child: Icon(bottomNavVisible ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up, size: 18))),
+      ))),
+    ]);
   }
 
   Widget _drawer({required bool compact}) {
@@ -1087,8 +1128,8 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
     if (p == null) return const Center(child: CircularProgressIndicator());
     return Column(
       children: [
-        _pageSelector(p),
         Expanded(child: _deckCanvas(p)),
+        _pageSelector(p),
       ],
     );
   }
@@ -1133,7 +1174,7 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
         final availableH = (constraints.maxHeight - padBase * 2 - gapBase * (rows - 1)).clamp(1.0, double.infinity);
         final fitW = availableW / columns;
         final fitH = availableH / rows;
-        final cellW = min(fitW, fitH / .76).clamp(compact ? 42.0 : 36.0, 150.0);
+        final cellW = min(fitW, fitH / .76).clamp(18.0, 150.0);
         final cellH = cellW * .76;
         final uiScale = (cellW / 105).clamp(.38, 1.18);
         final packed = packTiles(p.tiles, rows, columns);
@@ -1154,14 +1195,18 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
         return Stack(children: [
           Center(child: InteractiveViewer(
             transformationController: _deckTransform,
-            panEnabled: !viewLocked, scaleEnabled: !viewLocked,
-            minScale: .45, maxScale: 3.2, boundaryMargin: const EdgeInsets.all(500), constrained: false,
+            panEnabled: !panLocked, scaleEnabled: !scaleLocked,
+            minScale: .35, maxScale: 3.2, boundaryMargin: const EdgeInsets.all(500), constrained: false,
             child: canvas,
           )),
           Positioned(right: compact ? 5 : 8, top: compact ? 5 : 8, child: Material(
             color: const Color(0xee202326),
-            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: BorderSide(color: mpBorder)),
-            child: InkWell(onTap: _toggleViewLock, child: Padding(padding: EdgeInsets.all(compact ? 6 : 8), child: Icon(viewLocked ? Icons.lock : Icons.lock_open, size: compact ? 16 : 19, color: Colors.white))),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: const BorderSide(color: mpBorder)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              IconButton(tooltip: scaleLocked ? 'Разблокировать масштаб' : 'Зафиксировать масштаб', onPressed: _toggleScaleLock, icon: Icon(scaleLocked ? Icons.lock : Icons.lock_open), iconSize: compact ? 16 : 19, visualDensity: VisualDensity.compact),
+              IconButton(tooltip: panLocked ? 'Разблокировать перемещение' : 'Заблокировать перемещение', onPressed: _togglePanLock, icon: Icon(panLocked ? Icons.pan_tool_alt : Icons.pan_tool_outlined), iconSize: compact ? 16 : 19, visualDensity: VisualDensity.compact),
+              IconButton(tooltip: 'Вписать и центрировать', onPressed: _fitDeck, icon: const Icon(Icons.center_focus_strong), iconSize: compact ? 16 : 19, visualDensity: VisualDensity.compact),
+            ]),
           )),
         ]);
       },
@@ -1176,8 +1221,11 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
     return Material(
       color: blank ? mpPanel : mpPanel2,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: BorderSide(color: mpBorder, width: 1)),
-      child: InkWell(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: blank ? null : () => _sendTile(tile),
+        onLongPressStart: blank ? null : (_) => _startLongPress(tile),
+        onLongPressEnd: blank ? null : (_) => _endLongPress(tile),
         child: Padding(
           padding: EdgeInsets.all(padding),
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [

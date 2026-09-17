@@ -50,6 +50,9 @@ public partial class MainWindow : Window
     private double _fitScale = 1;
     private double _userZoom = 1;
     private Point _actionDragStart;
+    private Point _tileDragStart;
+    private Window? _qrWindow;
+    private readonly Dictionary<string, List<ushort>> _heldRemoteKeys = new();
 
     public MainWindow()
     {
@@ -190,6 +193,7 @@ public partial class MainWindow : Window
         device.LastSeenUtc = DateTime.UtcNow;
         SaveState();
         RefreshTrustedDevices();
+        Dispatcher.BeginInvoke(() => { if (_qrWindow is not null) { _qrWindow.Close(); _qrWindow = null; } });
         return device;
     }
 
@@ -254,9 +258,25 @@ public partial class MainWindow : Window
         SaveState(); RefreshTrustedDevices(); UpdateConnectionStatus();
     }
 
-    private void HeaderSettingsButton_Click(object sender, RoutedEventArgs e)
+    private void ProfileSettingsButton_Click(object sender, RoutedEventArgs e) => ProfileSettingsPopup.IsOpen = !ProfileSettingsPopup.IsOpen;
+
+    private async void HeaderSettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        SettingsPopup.IsOpen = !SettingsPopup.IsOpen;
+        var win = new Window { Owner = this, Title = "NEXO — подключение и устройства", Width = 560, Height = 560, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = (Brush)FindResource("Bg") };
+        var root = new StackPanel { Margin = new Thickness(18) };
+        root.Children.Add(new TextBlock { Text = "Подключение", FontSize = 20, FontWeight = FontWeights.SemiBold });
+        var combo = new ComboBox { Height = 34, Margin = new Thickness(0,10,0,10), ItemsSource = new[] { "Wi‑Fi", "Bluetooth LE" }, SelectedIndex = SelectedTransport() == "Bluetooth" ? 1 : 0 };
+        root.Children.Add(combo);
+        var qr = new Button { Content = "Показать QR-код", Height = 34, Margin = new Thickness(0,0,0,16) }; qr.Click += ShowQr_Click; root.Children.Add(qr);
+        root.Children.Add(new TextBlock { Text = "Привязанные устройства", FontSize = 16, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0,4,0,8) });
+        foreach (var d in _state.TrustedDevices.OrderByDescending(x => x.LastSeenUtc))
+        {
+            var row = new Grid { Height = 46, Margin = new Thickness(0,0,0,4) }; row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
+            row.Children.Add(new TextBlock { Text = $"{d.Name}   •   {d.Transport}", VerticalAlignment = VerticalAlignment.Center, Foreground = Brushes.White });
+            var more = new Button { Content = "⋮", Tag = d }; more.Click += TrustedDeviceMenu_Click; Grid.SetColumn(more,1); row.Children.Add(more); root.Children.Add(row);
+        }
+        combo.SelectionChanged += async (_, _) => { await StopAllTransportsAsync(); _state.Transport = combo.SelectedIndex == 1 ? "Bluetooth" : "Wifi"; ApplyTransport(); SaveState(); await StartSelectedTransportAsync(); };
+        win.Content = new ScrollViewer { Content = root }; win.ShowDialog();
     }
 
     private static Profile DefaultProfile(string name, string icon)
@@ -355,9 +375,6 @@ public partial class MainWindow : Window
         RowsBox.Text = _page.Rows.ToString();
         _userZoom = Math.Clamp(_page.Zoom, ZoomSlider.Minimum, ZoomSlider.Maximum);
         ZoomSlider.Value = _userZoom;
-        PageBox.ItemsSource = null;
-        PageBox.ItemsSource = _profile.Pages;
-        PageBox.SelectedItem = _page;
         _updating = false;
 
         _selected = null;
@@ -498,6 +515,8 @@ public partial class MainWindow : Window
             root.Children.Add(new TextBlock { Text = number.ToString(), FontSize = 10, Foreground = Brushes.Gray, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top });
         button.Content = root;
 
+        button.PreviewMouseLeftButtonDown += (_, e) => _tileDragStart = e.GetPosition(this);
+        button.PreviewMouseMove += (_, e) => Tile_PreviewMouseMove(button, tile, e);
         button.Click += (_, _) => SelectTile(button, tile);
         button.MouseDoubleClick += (_, _) => FocusTile(button);
         button.DragOver += Tile_DragOver;
@@ -604,19 +623,36 @@ public partial class MainWindow : Window
         RefreshInspector();
     }
 
+    private void Tile_PreviewMouseMove(Button button, Tile tile, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || _page is null) return;
+        var current = e.GetPosition(this);
+        if (Math.Abs(current.X - _tileDragStart.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(current.Y - _tileDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        DragDrop.DoDragDrop(button, new DataObject("NexoTile", tile.Id), DragDropEffects.Move);
+    }
+
     private void Tile_DragOver(object sender, DragEventArgs e)
     {
-        e.Effects = e.Data.GetDataPresent("MacroPadAction") ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Effects = e.Data.GetDataPresent("MacroPadAction") ? DragDropEffects.Copy : e.Data.GetDataPresent("NexoTile") ? DragDropEffects.Move : DragDropEffects.None;
         e.Handled = true;
     }
 
     private void Tile_Drop(object sender, DragEventArgs e)
     {
-        if (sender is not Button { Tag: Tile tile } button || e.Data.GetData("MacroPadAction") is not ActionItem action) return;
-        AssignAction(tile, action);
-        SelectTile(button, tile);
-        SaveAndBroadcast();
-        e.Handled = true;
+        if (sender is not Button { Tag: Tile tile } button || _page is null) return;
+        if (e.Data.GetData("MacroPadAction") is ActionItem action)
+        {
+            AssignAction(tile, action); SelectTile(button, tile); SaveAndBroadcast(); e.Handled = true; return;
+        }
+        if (e.Data.GetData("NexoTile") is string sourceId)
+        {
+            var source = _page.Tiles.FirstOrDefault(t => t.Id == sourceId);
+            if (source is null || ReferenceEquals(source, tile)) return;
+            var a = _page.Tiles.IndexOf(source); var b = _page.Tiles.IndexOf(tile);
+            if (a < 0 || b < 0) return;
+            (_page.Tiles[a], _page.Tiles[b]) = (_page.Tiles[b], _page.Tiles[a]);
+            SaveAndBroadcast(); e.Handled = true;
+        }
     }
 
     private void AssignAction(Tile tile, ActionItem action)
@@ -783,6 +819,50 @@ public partial class MainWindow : Window
         tile.ColumnSpan = columns; tile.RowSpan = rows; EnsureCapacity(_page); SaveAndBroadcast();
     }
 
+    private string HoldKey(string clientId, string tileId) => $"{clientId}:{tileId}";
+
+    private void StartRemoteHold(string clientId, Tile tile)
+    {
+        var hotkey = tile.ActionType == "media" ? tile.ActionValue : tile.Hotkey;
+        if (tile.ActionType == "hotkey" || tile.ActionType == "media" || (!string.IsNullOrWhiteSpace(hotkey) && string.IsNullOrWhiteSpace(tile.ActionType)))
+        {
+            var keys = HotkeyVirtualKeys(hotkey);
+            if (keys.Count == 0) return;
+            var key = HoldKey(clientId, tile.Id);
+            if (_heldRemoteKeys.ContainsKey(key)) return;
+            SendInputs(keys.Select(vk => KeyInput(vk, false)).ToArray());
+            _heldRemoteKeys[key] = keys;
+            DeviceStatus.Text = $"Удерживается: {tile.Title}";
+            return;
+        }
+
+        _ = ExecuteTileAsync(tile);
+    }
+
+    private void EndRemoteHold(string clientId, string tileId)
+    {
+        var key = HoldKey(clientId, tileId);
+        if (!_heldRemoteKeys.Remove(key, out var keys)) return;
+        SendInputs(keys.AsEnumerable().Reverse().Select(vk => KeyInput(vk, true)).ToArray());
+        DeviceStatus.Text = "Удержание завершено";
+    }
+
+    private void ReleaseRemoteHolds(string clientId)
+    {
+        foreach (var key in _heldRemoteKeys.Keys.Where(k => k.StartsWith(clientId + ":", StringComparison.Ordinal)).ToList())
+        {
+            if (!_heldRemoteKeys.Remove(key, out var keys)) continue;
+            try { SendInputs(keys.AsEnumerable().Reverse().Select(vk => KeyInput(vk, true)).ToArray()); } catch { }
+        }
+    }
+
+    private static List<ushort> HotkeyVirtualKeys(string hotkey)
+    {
+        if (string.IsNullOrWhiteSpace(hotkey)) return new List<ushort>();
+        return hotkey.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(TokenToVk).Where(vk => vk != 0).ToList();
+    }
+
     private async Task ExecuteTileAsync(Tile tile)
     {
         try
@@ -846,11 +926,6 @@ public partial class MainWindow : Window
         _profile = selected; _state.ActiveProfileId = selected.Id; SaveState(); LoadProfile(); _ = BroadcastSnapshotAsync();
     }
 
-    private void PageBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_updating || _profile is null || PageBox.SelectedItem is not DeckPage selected) return;
-        _profile.ActivePageId = selected.Id; SaveState(); LoadProfile(); _ = BroadcastSnapshotAsync();
-    }
 
     private void AddProfile_Click(object sender, RoutedEventArgs e)
     {
@@ -1163,7 +1238,11 @@ public partial class MainWindow : Window
                 _clientIds.Remove(socket);
                 stillOnline = _clientIds.Values.Any(x => x == clientId);
             }
-            if (!stillOnline) MarkTrustedClient(clientId, false, "Wi‑Fi");
+            if (!stillOnline)
+            {
+                Dispatcher.Invoke(() => ReleaseRemoteHolds(clientId));
+                MarkTrustedClient(clientId, false, "Wi‑Fi");
+            }
             Dispatcher.Invoke(UpdateConnectionStatus);
         }
     }
@@ -1248,6 +1327,7 @@ public partial class MainWindow : Window
             if (messageType == "switchProfile" && root.TryGetProperty("profileId", out var profileIdProp))
             {
                 var profileId = profileIdProp.GetString() ?? "";
+                var forced = root.TryGetProperty("force", out var forceProp) && forceProp.ValueKind == JsonValueKind.True;
                 var profile = _profiles.FirstOrDefault(p => p.Id == profileId);
                 if (profile is not null)
                 {
@@ -1257,6 +1337,7 @@ public partial class MainWindow : Window
                         SaveState();
                         RefreshProfiles();
                     });
+                    if (forced) Dispatcher.Invoke(() => DeviceStatus.Text = $"Профиль выбран с телефона: {profile.Name}");
                     await BroadcastSnapshotAsync();
                 }
                 return;
@@ -1278,20 +1359,30 @@ public partial class MainWindow : Window
                 return;
             }
 
-            if (root.TryGetProperty("tileId", out var tileIdProp))
+            if ((messageType == "press" || messageType == "longPressStart" || messageType == "longPressEnd") && root.TryGetProperty("tileId", out var tileIdProp))
             {
-                var tileId = tileIdProp.GetString();
+                var tileId = tileIdProp.GetString() ?? "";
                 var tile = _state.Profiles.SelectMany(p => p.Pages).SelectMany(p => p.Tiles).FirstOrDefault(t => t.Id == tileId);
-                if (tile is not null)
-                {
-                    Dispatcher.Invoke(() => DeviceStatus.Text = $"Команда получена: {tile.Title}");
-                    var executeTask = await Dispatcher.InvokeAsync(() => ExecuteTileAsync(tile));
-                    await executeTask;
-                }
-                else
+                if (tile is null)
                 {
                     Dispatcher.Invoke(() => DeviceStatus.Text = $"Команда не найдена: {tileId}");
+                    return;
                 }
+
+                if (messageType == "longPressStart")
+                {
+                    await Dispatcher.InvokeAsync(() => StartRemoteHold(clientId, tile));
+                    return;
+                }
+                if (messageType == "longPressEnd")
+                {
+                    await Dispatcher.InvokeAsync(() => EndRemoteHold(clientId, tile.Id));
+                    return;
+                }
+
+                Dispatcher.Invoke(() => DeviceStatus.Text = $"Команда получена: {tile.Title}");
+                var executeTask = await Dispatcher.InvokeAsync(() => ExecuteTileAsync(tile));
+                await executeTask;
                 return;
             }
 
@@ -1375,6 +1466,8 @@ public partial class MainWindow : Window
         }
 
         var window = new Window { Owner = this, Title = "Быстрое подключение", Width = 440, Height = 525, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = (Brush)FindResource("Bg") };
+        _qrWindow = window;
+        window.Closed += (_, _) => { if (ReferenceEquals(_qrWindow, window)) _qrWindow = null; };
         var panel = new StackPanel { Margin = new Thickness(22) };
         panel.Children.Add(new TextBlock { Text = "Подключить телефон", FontSize = 22, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center });
         panel.Children.Add(new TextBlock { Text = caption, Foreground = (Brush)FindResource("Muted"), TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 14) });

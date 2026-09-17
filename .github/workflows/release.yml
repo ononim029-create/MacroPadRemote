@@ -126,7 +126,7 @@ jobs:
           ZIP=artifacts/windows/NEXO-win-x64.zip
           SHA=$(sha256sum "$ZIP" | awk '{print $1}')
           cat > preview.json <<JSON
-          {"version":"0.9.0-preview","channel":"preview","packageUrl":"https://github.com/${GH_REPO}/releases/download/preview/NEXO-win-x64.zip","sha256":"${SHA}","mandatory":false,"notes":"NEXO v0.9: per-key label visibility, compact landscape UI, lockable pan/zoom workspace, explicit device switching, forget-device controls, and contrast fixes"}
+          {"version":"1.0.0-preview","channel":"preview","packageUrl":"https://github.com/${GH_REPO}/releases/download/preview/NEXO-win-x64.zip","sha256":"${SHA}","mandatory":false,"notes":"NEXO v1.0: centered landscape fit, forced profile switching, haptics and long press, collapsible landscape navigation, independent scale/pan locks, tile reorder, reorganized properties and device settings"}
           JSON
       - name: Publish rolling preview
         env:
