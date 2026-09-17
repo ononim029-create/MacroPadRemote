@@ -1,0 +1,133 @@
+diff --git a/src/windows/MacroPadRemote/MainWindow.xaml.cs b/src/windows/MacroPadRemote/MainWindow.xaml.cs
+index 31ae8ae..9248992 100644
+--- a/src/windows/MacroPadRemote/MainWindow.xaml.cs
++++ b/src/windows/MacroPadRemote/MainWindow.xaml.cs
+@@ -477,6 +477,10 @@ public partial class MainWindow : Window
+         };
+         menu.Items.Add(properties);
+ 
++        var test = new MenuItem { Header = "Выполнить тест" };
++        test.Click += async (_, _) => await ExecuteTileAsync(tile);
++        menu.Items.Add(test);
++
+         var multi = new MenuItem { Header = "Создать Multi Action" };
+         multi.Click += (_, _) =>
+         {
+@@ -637,10 +641,11 @@ public partial class MainWindow : Window
+                     if (!string.IsNullOrWhiteSpace(tile.Hotkey)) ExecuteHotkey(tile.Hotkey);
+                     break;
+             }
++            Dispatcher.Invoke(() => DeviceStatus.Text = $"Выполнено: {tile.Title}");
+         }
+         catch (Exception ex)
+         {
+-            Dispatcher.Invoke(() => DeviceStatus.Text = $"Ошибка действия: {ex.Message}");
++            Dispatcher.Invoke(() => DeviceStatus.Text = $"Ошибка действия «{tile.Title}»: {ex.Message}");
+         }
+     }
+ 
+@@ -973,9 +978,14 @@ public partial class MainWindow : Window
+                 var tile = _state.Profiles.SelectMany(p => p.Pages).SelectMany(p => p.Tiles).FirstOrDefault(t => t.Id == tileId);
+                 if (tile is not null)
+                 {
++                    Dispatcher.Invoke(() => DeviceStatus.Text = $"Команда получена: {tile.Title}");
+                     var executeTask = await Dispatcher.InvokeAsync(() => ExecuteTileAsync(tile));
+                     await executeTask;
+                 }
++                else
++                {
++                    Dispatcher.Invoke(() => DeviceStatus.Text = $"Команда не найдена: {tileId}");
++                }
+                 return;
+             }
+             // Backward compatibility with old APKs.
+@@ -1202,10 +1212,67 @@ public partial class MainWindow : Window
+     private const uint KEYEVENTF_KEYUP = 0x0002;
+     private const uint KEYEVENTF_UNICODE = 0x0004;
+ 
+-    [StructLayout(LayoutKind.Sequential)] private struct INPUT { public uint type; public InputUnion U; }
+-    [StructLayout(LayoutKind.Explicit)] private struct InputUnion { [FieldOffset(0)] public KEYBDINPUT ki; }
+-    [StructLayout(LayoutKind.Sequential)] private struct KEYBDINPUT { public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public UIntPtr dwExtraInfo; }
+-    [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
++    [StructLayout(LayoutKind.Sequential)]
++    private struct INPUT
++    {
++        public uint type;
++        public InputUnion U;
++    }
++
++    // INPUT contains a native union. On x64 the union must be large enough for MOUSEINPUT
++    // (32 bytes), otherwise Marshal.SizeOf<INPUT>() becomes 32 instead of the required 40
++    // and SendInput fails with ERROR_INVALID_PARAMETER.
++    [StructLayout(LayoutKind.Explicit)]
++    private struct InputUnion
++    {
++        [FieldOffset(0)] public MOUSEINPUT mi;
++        [FieldOffset(0)] public KEYBDINPUT ki;
++        [FieldOffset(0)] public HARDWAREINPUT hi;
++    }
++
++    [StructLayout(LayoutKind.Sequential)]
++    private struct MOUSEINPUT
++    {
++        public int dx;
++        public int dy;
++        public uint mouseData;
++        public uint dwFlags;
++        public uint time;
++        public UIntPtr dwExtraInfo;
++    }
++
++    [StructLayout(LayoutKind.Sequential)]
++    private struct KEYBDINPUT
++    {
++        public ushort wVk;
++        public ushort wScan;
++        public uint dwFlags;
++        public uint time;
++        public UIntPtr dwExtraInfo;
++    }
++
++    [StructLayout(LayoutKind.Sequential)]
++    private struct HARDWAREINPUT
++    {
++        public uint uMsg;
++        public ushort wParamL;
++        public ushort wParamH;
++    }
++
++    [DllImport("user32.dll", SetLastError = true)]
++    private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
++
++    private static void SendInputs(IReadOnlyCollection<INPUT> inputs)
++    {
++        if (inputs.Count == 0) return;
++        var buffer = inputs.ToArray();
++        var sent = SendInput((uint)buffer.Length, buffer, Marshal.SizeOf<INPUT>());
++        if (sent != buffer.Length)
++        {
++            var error = Marshal.GetLastWin32Error();
++            throw new Win32Exception(error, $"SendInput отправил {sent} из {buffer.Length} событий (INPUT={Marshal.SizeOf<INPUT>()} байт)");
++        }
++    }
+ 
+     private static void ExecuteHotkey(string hotkey)
+     {
+@@ -1221,7 +1288,7 @@ public partial class MainWindow : Window
+         var inputs = new List<INPUT>();
+         foreach (var vk in keys) inputs.Add(KeyInput(vk, false));
+         for (var i = keys.Count - 1; i >= 0; i--) inputs.Add(KeyInput(keys[i], true));
+-        SendInput((uint)inputs.Count, inputs.ToArray(), Marshal.SizeOf<INPUT>());
++        SendInputs(inputs);
+     }
+ 
+     private static INPUT KeyInput(ushort vk, bool up) => new() { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = vk, dwFlags = up ? KEYEVENTF_KEYUP : 0 } } };
+@@ -1256,7 +1323,7 @@ public partial class MainWindow : Window
+             inputs.Add(new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wScan = ch, dwFlags = KEYEVENTF_UNICODE } } });
+             inputs.Add(new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wScan = ch, dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP } } });
+         }
+-        SendInput((uint)inputs.Count, inputs.ToArray(), Marshal.SizeOf<INPUT>());
++        SendInputs(inputs);
+     }
+     #endregion
+ }
