@@ -30,7 +30,7 @@ UsePreviousAppDir=yes
 SetupLogging=yes
 VersionInfoVersion=1.1.0.0
 VersionInfoProductName=NEXO Setup
-VersionInfoProductVersion=1.1.0-preview
+VersionInfoProductVersion=1.1.0.0
 VersionInfoCompany=NEXO
 VersionInfoDescription=NEXO Setup
 
