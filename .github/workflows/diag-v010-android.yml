@@ -1,0 +1,47 @@
+name: Diagnose NEXO v0.10 Android
+
+on:
+  push:
+    branches: [feature/nexo-v010-workspace-controls]
+
+permissions:
+  contents: write
+
+jobs:
+  analyze:
+    if: ${{ !contains(github.event.head_commit.message, '[diag-result]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feature/nexo-v010-workspace-controls
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Create Android host and capture analyzer output
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build-mobile
+          flutter create build-mobile --platforms android --project-name nexo
+          cp src/mobile/macropad_mobile/pubspec.yaml build-mobile/pubspec.yaml
+          cp src/mobile/macropad_mobile/lib/main.dart build-mobile/lib/main.dart
+          rm -rf build-mobile/test
+          cd build-mobile
+          flutter pub get >/tmp/pubget.txt 2>&1
+          set +e
+          flutter analyze >/tmp/v010-analyze.txt 2>&1
+          STATUS=$?
+          set -e
+          cd ..
+          cp /tmp/v010-analyze.txt v010-analyze.txt
+          echo "ANALYZE_EXIT=$STATUS" >> v010-analyze.txt
+      - name: Commit analyzer output
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add v010-analyze.txt
+          git commit -m "Capture NEXO v0.10 Android analyzer output [diag-result]"
+          git push
