@@ -52,7 +52,7 @@ class _TabletRemoteKeyboard extends StatelessWidget {
   static const _rows = <List<_KeyboardKeySpec>>[
     [
       _KeyboardKeySpec('ESC', 'Esc', flex: 13),
-      _KeyboardKeySpec('GRAVE', '`', ru: 'Ё', enShift: '~'),
+      _KeyboardKeySpec('GRAVE', '`', ru: 'Ё', enShift: '~', ruShift: '~'),
       _KeyboardKeySpec('1', '1', enShift: '!', ruShift: '!'),
       _KeyboardKeySpec('2', '2', enShift: '@', ruShift: '"'),
       _KeyboardKeySpec('3', '3', enShift: '#', ruShift: '№'),
@@ -79,8 +79,8 @@ class _TabletRemoteKeyboard extends StatelessWidget {
       _KeyboardKeySpec('I', 'I', ru: 'Ш'),
       _KeyboardKeySpec('O', 'O', ru: 'Щ'),
       _KeyboardKeySpec('P', 'P', ru: 'З'),
-      _KeyboardKeySpec('LBRACKET', '[', ru: 'Х', enShift: '{'),
-      _KeyboardKeySpec('RBRACKET', ']', ru: 'Ъ', enShift: '}'),
+      _KeyboardKeySpec('LBRACKET', '[', ru: 'Х', enShift: '{', ruShift: '[{'),
+      _KeyboardKeySpec('RBRACKET', ']', ru: 'Ъ', enShift: '}', ruShift: ']}'),
       _KeyboardKeySpec('BACKSLASH', r'\', ru: r'\', enShift: '|', ruShift: '/', flex: 13),
     ],
     [
@@ -94,8 +94,8 @@ class _TabletRemoteKeyboard extends StatelessWidget {
       _KeyboardKeySpec('J', 'J', ru: 'О'),
       _KeyboardKeySpec('K', 'K', ru: 'Л'),
       _KeyboardKeySpec('L', 'L', ru: 'Д'),
-      _KeyboardKeySpec('SEMICOLON', ';', ru: 'Ж', enShift: ':'),
-      _KeyboardKeySpec('QUOTE', "'", ru: 'Э', enShift: '"'),
+      _KeyboardKeySpec('SEMICOLON', ';', ru: 'Ж', enShift: ':', ruShift: ';:'),
+      _KeyboardKeySpec('QUOTE', "'", ru: 'Э', enShift: '"', ruShift: '\'"'),
       _KeyboardKeySpec('ENTER', 'Enter', flex: 22),
     ],
     [
@@ -107,9 +107,9 @@ class _TabletRemoteKeyboard extends StatelessWidget {
       _KeyboardKeySpec('B', 'B', ru: 'И'),
       _KeyboardKeySpec('N', 'N', ru: 'Т'),
       _KeyboardKeySpec('M', 'M', ru: 'Ь'),
-      _KeyboardKeySpec('COMMA', ',', ru: 'Б', enShift: '<'),
-      _KeyboardKeySpec('PERIOD', '.', ru: 'Ю', enShift: '>'),
-      _KeyboardKeySpec('SLASH', '/', ru: '.', enShift: '?', ruShift: ','),
+      _KeyboardKeySpec('COMMA', ',', ru: 'Б', enShift: '<', ruShift: ',<'),
+      _KeyboardKeySpec('PERIOD', '.', ru: 'Ю', enShift: '>', ruShift: '.>'),
+      _KeyboardKeySpec('SLASH', '/', ru: '.', enShift: '?', ruShift: '/?'),
       _KeyboardKeySpec('SHIFT', 'Shift', flex: 24),
     ],
     [
