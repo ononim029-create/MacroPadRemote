@@ -46,6 +46,172 @@ def patch_windows() -> None:
 '''
     text = insert_before_once(text, marker, insertion, "unicode text input protocol")
 
+
+    text = replace_once(
+        text,
+        '        yield return new("Система", "⌨", "Горячая клавиша", "Нажмите сочетание клавиш в инспекторе", "hotkey", "");',
+        '        yield return new("Система", "⌨", "Горячая клавиша", "Нажмите сочетание клавиш в инспекторе", "hotkey", "");\n        yield return new("Система", "⚡", "Супер горячая клавиша", "Последовательности AA / AW или сочетания A+W с интервалом, повторами и таймером", "superhotkey", "AW");',
+        "super hotkey action library",
+    )
+
+    text = replace_once(
+        text,
+        '        "hotkey" => tile.Hotkey,\n        "text" => "Текст",',
+        '        "hotkey" => tile.Hotkey,\n        "superhotkey" => tile.ActionValue,\n        "text" => "Текст",',
+        "super hotkey tile caption",
+    )
+
+    text = replace_once(
+        text,
+        '        "hotkey" => "Горячая клавиша",\n        "text" => "Текст",',
+        '        "hotkey" => "Горячая клавиша",\n        "superhotkey" => "Супер горячая клавиша",\n        "text" => "Текст",',
+        "super hotkey action type name",
+    )
+
+    text = replace_once(
+        text,
+        '                "text" => "Текст",\n                "open" => "Путь к программе / файлу / папке",',
+        '                "superhotkey" => "Последовательность: AA, AW, A+W, CTRL+S",\n                "text" => "Текст",\n                "open" => "Путь к программе / файлу / папке",',
+        "super hotkey inspector label",
+    )
+
+    text = replace_once(
+        text,
+        '        tile.Hotkey = action.Type == "hotkey" ? action.Value : "";\n        if (action.Type != "multi") tile.Steps.Clear();',
+        '        tile.Hotkey = action.Type == "hotkey" ? action.Value : "";\n        if (action.Type == "superhotkey")\n        {\n            if (string.IsNullOrWhiteSpace(tile.ActionValue)) tile.ActionValue = "AW";\n            tile.MacroIntervalMs = 50;\n            tile.MacroRepeatCount = 1;\n            tile.MacroStartDelayMs = 0;\n        }\n        if (action.Type != "multi") tile.Steps.Clear();',
+        "super hotkey defaults",
+    )
+
+    text = replace_once(
+        text,
+        '        if (_selected.ActionType == "hotkey") _selected.Hotkey = InspectorHotkeyBox.Text.Trim().ToUpperInvariant();\n        SaveAndBroadcast();',
+        '        if (_selected.ActionType == "hotkey") _selected.Hotkey = InspectorHotkeyBox.Text.Trim().ToUpperInvariant();\n        if (_selected.ActionType == "superhotkey")\n        {\n            _selected.ActionValue = InspectorValueBox.Text.Trim().ToUpperInvariant();\n            _selected.MacroIntervalMs = int.TryParse(SuperIntervalBox.Text, out var interval) ? Math.Clamp(interval, 0, 60000) : 50;\n            _selected.MacroRepeatCount = int.TryParse(SuperRepeatBox.Text, out var repeat) ? Math.Clamp(repeat, 1, 999) : 1;\n            _selected.MacroStartDelayMs = int.TryParse(SuperTimerBox.Text, out var timer) ? Math.Clamp(timer, 0, 3600000) : 0;\n        }\n        SaveAndBroadcast();',
+        "apply super hotkey settings",
+    )
+
+    text = replace_once(
+        text,
+        '            InspectorValueLabel.Text = "Параметр";\n            InspectorShowLabel.IsChecked = true;',
+        '            InspectorValueLabel.Text = "Параметр";\n            SuperHotkeySettingsPanel.Visibility = Visibility.Collapsed;\n            SuperIntervalBox.Text = "50";\n            SuperRepeatBox.Text = "1";\n            SuperTimerBox.Text = "0";\n            InspectorShowLabel.IsChecked = true;',
+        "clear super hotkey inspector",
+    )
+
+    text = replace_once(
+        text,
+        '            InspectorHotkeyBox.Text = _selected.Hotkey;\n            InspectorShowLabel.IsChecked = _selected.ShowLabel;',
+        '            InspectorHotkeyBox.Text = _selected.Hotkey;\n            SuperHotkeySettingsPanel.Visibility = _selected.ActionType == "superhotkey" ? Visibility.Visible : Visibility.Collapsed;\n            SuperIntervalBox.Text = _selected.MacroIntervalMs.ToString();\n            SuperRepeatBox.Text = _selected.MacroRepeatCount.ToString();\n            SuperTimerBox.Text = _selected.MacroStartDelayMs.ToString();\n            InspectorShowLabel.IsChecked = _selected.ShowLabel;',
+        "show super hotkey inspector",
+    )
+
+    text = replace_once(
+        text,
+        '        InspectorHotkeyBox.IsEnabled = enabled;\n        RecordHotkeyButton.IsEnabled = enabled;',
+        '        InspectorHotkeyBox.IsEnabled = enabled && _selected?.ActionType != "superhotkey";\n        RecordHotkeyButton.IsEnabled = enabled && _selected?.ActionType != "superhotkey";',
+        "disable normal recorder for super hotkey",
+    )
+
+    text = replace_once(
+        text,
+        '        tile.Title = "Добавить"; tile.ActionType = ""; tile.ActionValue = ""; tile.Hotkey = ""; tile.IconKind = "auto"; tile.IconValue = ""; tile.ShowLabel = true; tile.ColumnSpan = tile.RowSpan = 1; tile.Steps.Clear();',
+        '        tile.Title = "Добавить"; tile.ActionType = ""; tile.ActionValue = ""; tile.Hotkey = ""; tile.IconKind = "auto"; tile.IconValue = ""; tile.ShowLabel = true; tile.ColumnSpan = tile.RowSpan = 1; tile.MacroIntervalMs = 50; tile.MacroRepeatCount = 1; tile.MacroStartDelayMs = 0; tile.Steps.Clear();',
+        "clear super hotkey settings",
+    )
+
+    text = replace_once(
+        text,
+        '                case "hotkey": ExecuteHotkey(tile.Hotkey); break;\n                case "text": SendText(tile.ActionValue); break;',
+        '                case "hotkey": ExecuteHotkey(tile.Hotkey); break;\n                case "superhotkey": await ExecuteSuperHotkeyAsync(tile); break;\n                case "text": SendText(tile.ActionValue); break;',
+        "execute super hotkey action",
+    )
+
+    text = replace_once(
+        text,
+        '    private static void ExecuteHotkey(string hotkey)\n    {',
+        r'''    private static async Task ExecuteSuperHotkeyAsync(Tile tile)
+    {
+        var sequence = tile.ActionValue?.Trim() ?? "";
+        if (sequence.Length == 0) return;
+
+        var interval = Math.Clamp(tile.MacroIntervalMs, 0, 60000);
+        var repeats = Math.Clamp(tile.MacroRepeatCount, 1, 999);
+        var startDelay = Math.Clamp(tile.MacroStartDelayMs, 0, 3600000);
+
+        if (startDelay > 0) await Task.Delay(startDelay);
+        for (var cycle = 0; cycle < repeats; cycle++)
+        {
+            await ExecuteSuperSequenceAsync(sequence, interval);
+            if (cycle + 1 < repeats && interval > 0)
+                await Task.Delay(interval);
+        }
+    }
+
+    private static async Task ExecuteSuperSequenceAsync(string sequence, int intervalMs)
+    {
+        var segments = sequence.Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var segment in segments)
+        {
+            if (segment.Contains('+') || TokenToVk(segment) != 0)
+            {
+                ExecuteHotkey(segment);
+                if (intervalMs > 0) await Task.Delay(intervalMs);
+                continue;
+            }
+
+            foreach (var ch in segment)
+            {
+                var token = ch.ToString().ToUpperInvariant();
+                if (TokenToVk(token) != 0)
+                    ExecuteHotkey(token);
+                else
+                    SendText(ch.ToString());
+
+                if (intervalMs > 0) await Task.Delay(intervalMs);
+            }
+        }
+    }
+
+    private static void ExecuteHotkey(string hotkey)
+    {''',
+        "super hotkey executor",
+    )
+
+    text = replace_once(
+        text,
+        '    private static string Glyph(Tile tile) => tile.ActionType switch\n    {\n        "hotkey" => "⌨", "text" => "T",',
+        '    private static string Glyph(Tile tile) => tile.ActionType switch\n    {\n        "hotkey" => "⌨", "superhotkey" => "⚡", "text" => "T",',
+        "super hotkey glyph",
+    )
+
+    text = replace_once(
+        text,
+        '    public string Hotkey { get; set; } = "";\n    public string IconKind { get; set; } = "auto";',
+        '    public string Hotkey { get; set; } = "";\n    public int MacroIntervalMs { get; set; } = 50;\n    public int MacroRepeatCount { get; set; } = 1;\n    public int MacroStartDelayMs { get; set; } = 0;\n    public string IconKind { get; set; } = "auto";',
+        "super hotkey model fields",
+    )
+
+    xaml_path = ROOT / "src/windows/MacroPadRemote/MainWindow.xaml"
+    xaml = xaml_path.read_text(encoding="utf-8")
+    xaml = replace_once(
+        xaml,
+        '<TextBox x:Name="InspectorValueBox" Height="30" TextChanged="InspectorChanged"/></StackPanel>',
+        r'''<TextBox x:Name="InspectorValueBox" Height="30" TextChanged="InspectorChanged"/>
+                        <Grid x:Name="SuperHotkeySettingsPanel" Visibility="Collapsed" Margin="0,7,0,0">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <TextBlock Text="Макрос: интервал / повторы / таймер" Foreground="{StaticResource Muted}" FontSize="9"/>
+                            <Grid Grid.Row="1" Margin="0,3,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="6"/><ColumnDefinition/><ColumnDefinition Width="6"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Интервал, мс" Foreground="{StaticResource Muted}" FontSize="8"/><TextBox x:Name="SuperIntervalBox" Height="27" Text="50"/></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Повторов" Foreground="{StaticResource Muted}" FontSize="8"/><TextBox x:Name="SuperRepeatBox" Height="27" Text="1"/></StackPanel>
+                                <StackPanel Grid.Column="4"><TextBlock Text="Таймер, мс" Foreground="{StaticResource Muted}" FontSize="8"/><TextBox x:Name="SuperTimerBox" Height="27" Text="0"/></StackPanel>
+                            </Grid>
+                            <TextBlock Grid.Row="2" Text="AW = A→W; AA = A→A; A+W = одновременное сочетание" Foreground="#86BFEF" FontSize="8" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                        </Grid>
+                    </StackPanel>''',
+        "super hotkey inspector controls",
+    )
+    xaml = xaml.replace('Text="  v1.1 preview"', 'Text="  v1.2.4 preview"', 1)
+    xaml_path.write_text(xaml, encoding="utf-8")
+
     path.write_text(text, encoding="utf-8")
     print(f"Applied v1.2.4 Windows fixes: {path}")
 
