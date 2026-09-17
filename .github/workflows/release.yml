@@ -75,6 +75,7 @@ jobs:
           set -euo pipefail
           python3 tools/apply_v12_patches.py mobile
           python3 tools/apply_v12_integration.py mobile
+          python3 tools/fix_v12_flutter.py
       - name: Create Android host
         shell: bash
         run: |
