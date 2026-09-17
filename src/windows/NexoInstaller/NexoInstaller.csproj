@@ -16,6 +16,7 @@
     <ApplicationIcon>Nexo.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="InstallerApp.cs" />
+    <Compile Include="OfflineInstallerApp.cs" />
+    <EmbeddedResource Include="NEXO-Payload.zip" LogicalName="NEXO.Payload.zip" />
   </ItemGroup>
 </Project>
