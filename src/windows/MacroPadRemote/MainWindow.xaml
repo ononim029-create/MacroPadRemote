@@ -23,7 +23,7 @@
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="▦" FontSize="23" FontWeight="Bold" Margin="0,0,10,0"/>
                     <TextBlock Text="MacroPad Remote" FontSize="18" FontWeight="SemiBold"/>
-                    <TextBlock Text="  v0.7 preview" FontSize="11" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                    <TextBlock Text="  v0.8 preview" FontSize="11" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                     <Border Background="#202326" BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="10,5" Margin="0,0,8,0">
@@ -211,6 +211,14 @@
                             <TextBlock x:Name="InspectorValueLabel" Text="Параметр" Foreground="{StaticResource Muted}" FontSize="10"/><TextBox x:Name="InspectorValueBox" Height="32" Margin="0,3,0,8" TextChanged="InspectorChanged"/>
                             <TextBlock Text="Горячая клавиша" Foreground="{StaticResource Muted}" FontSize="10"/>
                             <Grid Margin="0,3,0,8"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="112"/></Grid.ColumnDefinitions><TextBox x:Name="InspectorHotkeyBox" Height="32" IsReadOnly="True"/><Button x:Name="RecordHotkeyButton" Grid.Column="1" Content="Записать" Margin="6,0,0,0" Click="RecordHotkey_Click" PreviewKeyDown="RecordHotkey_PreviewKeyDown"/></Grid>
+                            <TextBlock Text="Иконка" Foreground="{StaticResource Muted}" FontSize="10"/>
+                            <Grid Margin="0,4,0,9">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition/><ColumnDefinition Width="88"/></Grid.ColumnDefinitions>
+                                <Border x:Name="InspectorIconPreview" Width="42" Height="42" Background="#111315" BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="5"/>
+                                <StackPanel Grid.Column="1" Margin="7,0,7,0" VerticalAlignment="Center"><TextBlock x:Name="InspectorIconStatus" Text="Автоматически" FontSize="10" TextWrapping="Wrap"/><Button x:Name="IconLibraryButton" Content="Библиотека…" Height="25" Margin="0,3,0,0" Click="IconLibrary_Click"/></StackPanel>
+                                <StackPanel Grid.Column="2"><Button x:Name="IconImportButton" Content="Импорт" Height="25" Click="IconImport_Click"/><Button x:Name="IconScreenshotButton" Content="Снимок" Height="25" Margin="0,3,0,0" Click="IconScreenshot_Click"/></StackPanel>
+                            </Grid>
+                            <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="90"/></Grid.ColumnDefinitions><TextBlock Text="ПКМ по пользовательской иконке в библиотеке — удалить." Foreground="{StaticResource Muted}" FontSize="9" TextWrapping="Wrap" VerticalAlignment="Center"/><Button x:Name="IconResetButton" Grid.Column="1" Content="Авто" Height="26" Click="IconReset_Click"/></Grid>
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="Очистить" Width="84" Margin="0,0,7,0" Click="ClearTile_Click"/><Button Content="Применить" Width="94" Click="ApplyInspector_Click"/></StackPanel>
                         </StackPanel>
                     </ScrollViewer>

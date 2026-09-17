@@ -1137,13 +1137,29 @@ class _RemotePageState extends State<RemotePage> {
         child: Padding(
           padding: EdgeInsets.all(padding),
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(_iconFor(tile), size: iconSize, color: blank ? const Color(0xff7c8287) : Colors.white),
+            _tileIcon(tile, iconSize, blank),
             SizedBox(height: (5 * scale).clamp(1.0, 6.0)),
             Flexible(child: Text(tile.title, textAlign: TextAlign.center, maxLines: scale < .52 ? 1 : 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: fontSize, color: blank ? const Color(0xff7c8287) : Colors.white, fontWeight: FontWeight.w600, height: 1.05))),
           ]),
         ),
       ),
     );
+  }
+
+  Widget _tileIcon(TileSnapshot tile, double size, bool blank) {
+    final color = blank ? const Color(0xff7c8287) : Colors.white;
+    if (tile.iconKind == 'image' && tile.iconValue.isNotEmpty) {
+      try {
+        final comma = tile.iconValue.indexOf(',');
+        final payload = comma >= 0 ? tile.iconValue.substring(comma + 1) : tile.iconValue;
+        final bytes = base64Decode(payload);
+        return SizedBox(width: size * 1.55, height: size * 1.55, child: Image.memory(bytes, fit: BoxFit.contain, gaplessPlayback: true));
+      } catch (_) {}
+    }
+    if (tile.iconKind == 'glyph' && tile.iconValue.isNotEmpty) {
+      return Text(tile.iconValue, style: TextStyle(fontSize: size, color: color, fontWeight: FontWeight.w600, height: 1));
+    }
+    return Icon(_iconFor(tile), size: size, color: color);
   }
 
   IconData _iconFor(TileSnapshot tile) => switch (tile.actionType) {
@@ -1273,13 +1289,17 @@ class TileSnapshot {
   final String id;
   final String title;
   final String actionType;
+  final String iconKind;
+  final String iconValue;
   final int rowSpan;
   final int columnSpan;
-  const TileSnapshot({required this.id, required this.title, required this.actionType, required this.rowSpan, required this.columnSpan});
+  const TileSnapshot({required this.id, required this.title, required this.actionType, required this.iconKind, required this.iconValue, required this.rowSpan, required this.columnSpan});
   factory TileSnapshot.fromJson(Map<String, dynamic> json) => TileSnapshot(
         id: '${json['id'] ?? ''}',
         title: '${json['title'] ?? 'Кнопка'}',
         actionType: '${json['actionType'] ?? ''}',
+        iconKind: '${json['iconKind'] ?? 'auto'}',
+        iconValue: '${json['iconValue'] ?? ''}',
         rowSpan: ((json['rowSpan'] as num?)?.toInt() ?? 1).clamp(1, 12).toInt(),
         columnSpan: ((json['columnSpan'] as num?)?.toInt() ?? 1).clamp(1, 12).toInt(),
       );
