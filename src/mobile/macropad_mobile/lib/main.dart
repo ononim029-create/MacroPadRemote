@@ -835,10 +835,17 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
   String? connectionError;
   String serverId = '';
   String serverName = '';
-  bool viewLocked = true;
+  bool scaleLocked = false;
+  bool panLocked = false;
+  bool landscapeNavExpanded = false;
+  String? manualProfileRequestId;
   final TransformationController _deckTransform = TransformationController();
   late final AnimationController _deckReturnController;
   Animation<Matrix4>? _deckReturnAnimation;
+  Size _lastDeckViewport = Size.zero;
+  Size _lastDeckCanvas = Size.zero;
+  String _lastAutoFitKey = '';
+  final Set<String> _holdingTiles = <String>{};
 
   @override
   void initState() {
@@ -921,24 +928,60 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
         final summaries = ((json['profiles'] ?? const []) as List)
             .map((item) => WorkspaceProfileSummary.fromJson(Map<String, dynamic>.from(item as Map)))
             .toList();
-        if (mounted) setState(() { profile = p; profiles = summaries; });
+        if (mounted) {
+          setState(() { profile = p; profiles = summaries; manualProfileRequestId = null; });
+          _scheduleFit(animate: true);
+        }
       }
     } catch (_) {}
   }
 
   Future<void> _sendTile(TileSnapshot tile) => widget.transport.send({'type': 'press', 'tileId': tile.id});
+  Future<void> _sendTileHoldStart(TileSnapshot tile) => widget.transport.send({'type': 'pressStart', 'tileId': tile.id});
+  Future<void> _sendTileHoldEnd(TileSnapshot tile) => widget.transport.send({'type': 'pressEnd', 'tileId': tile.id});
   Future<void> _sendHotkey(String hotkey) => widget.transport.send({'type': 'hotkey', 'hotkey': hotkey});
-  Future<void> _switchProfile(String profileId) => widget.transport.send({'type': 'switchProfile', 'profileId': profileId});
+  Future<void> _sendHotkeyHoldStart(String hotkey) => widget.transport.send({'type': 'hotkeyStart', 'hotkey': hotkey});
+  Future<void> _sendHotkeyHoldEnd(String hotkey) => widget.transport.send({'type': 'hotkeyEnd', 'hotkey': hotkey});
+
+  Future<void> _switchProfile(String profileId) async {
+    if (mounted) setState(() => manualProfileRequestId = profileId);
+    await widget.transport.send({'type': 'switchProfile', 'profileId': profileId, 'force': true, 'source': 'mobile'});
+  }
+
   Future<void> _switchPage(String pageId) => widget.transport.send({'type': 'switchPage', 'pageId': pageId});
 
-  void _toggleViewLock() {
-    final next = !viewLocked;
-    setState(() => viewLocked = next);
-    if (next) {
-      _deckReturnController.stop();
-      _deckReturnAnimation = Matrix4Tween(begin: _deckTransform.value.clone(), end: Matrix4.identity()).animate(CurvedAnimation(parent: _deckReturnController, curve: Curves.easeOutCubic));
-      _deckReturnController.forward(from: 0);
+  void _toggleScaleLock() => setState(() => scaleLocked = !scaleLocked);
+  void _togglePanLock() => setState(() => panLocked = !panLocked);
+
+  Matrix4 _fitMatrix(Size viewport, Size canvas) {
+    if (viewport.width <= 0 || viewport.height <= 0 || canvas.width <= 0 || canvas.height <= 0) return Matrix4.identity();
+    final sx = max(0.05, (viewport.width - 16) / canvas.width);
+    final sy = max(0.05, (viewport.height - 16) / canvas.height);
+    final scale = min(1.0, min(sx, sy)).clamp(.05, 1.0).toDouble();
+    final tx = (viewport.width - canvas.width * scale) / 2;
+    final ty = (viewport.height - canvas.height * scale) / 2;
+    return Matrix4.identity()..translateByDouble(tx, ty, 0, 1)..scaleByDouble(scale, scale, scale, 1);
+  }
+
+  void _animateDeckTo(Matrix4 target, {bool animate = true}) {
+    _deckReturnController.stop();
+    if (!animate) {
+      _deckTransform.value = target;
+      return;
     }
+    _deckReturnAnimation = Matrix4Tween(begin: _deckTransform.value.clone(), end: target).animate(CurvedAnimation(parent: _deckReturnController, curve: Curves.easeOutCubic));
+    _deckReturnController.forward(from: 0);
+  }
+
+  void _scheduleFit({bool animate = true}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _lastDeckViewport == Size.zero || _lastDeckCanvas == Size.zero) return;
+      _animateDeckTo(_fitMatrix(_lastDeckViewport, _lastDeckCanvas), animate: animate);
+    });
+  }
+
+  Future<void> _haptic() async {
+    if (profile?.hapticFeedbackEnabled != false) await HapticFeedback.lightImpact();
   }
 
   Future<void> _forgetCurrentDevice() async {
@@ -967,23 +1010,58 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
       child: Scaffold(
         drawer: _drawer(compact: compact),
         appBar: AppBar(
-          toolbarHeight: compact ? 38 : null,
-          titleSpacing: compact ? 8 : null,
-          title: Row(mainAxisSize: MainAxisSize.min, children: [MacroPadMark(size: compact ? 17 : 22), SizedBox(width: compact ? 6 : 9), Flexible(child: Text(profile?.name ?? 'NEXO', overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: compact ? 13 : null)))]),
+          toolbarHeight: compact ? 34 : null,
+          titleSpacing: compact ? 7 : null,
+          title: Row(mainAxisSize: MainAxisSize.min, children: [MacroPadMark(size: compact ? 16 : 22), SizedBox(width: compact ? 5 : 9), Flexible(child: Text(profile?.name ?? 'NEXO', overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: compact ? 12 : null)))]),
           actions: [
-            IconButton(tooltip: viewLocked ? 'Разблокировать вид' : 'Заблокировать вид', visualDensity: compact ? VisualDensity.compact : VisualDensity.standard, onPressed: _toggleViewLock, icon: Icon(viewLocked ? Icons.lock : Icons.lock_open, size: compact ? 19 : 23)),
-            IconButton(tooltip: 'Повернуть экран', visualDensity: compact ? VisualDensity.compact : VisualDensity.standard, onPressed: () => toggleScreenOrientation(context), icon: Icon(Icons.screen_rotation, size: compact ? 19 : 23)),
-            Padding(padding: EdgeInsets.only(right: compact ? 5 : 10), child: Center(child: Row(children: [Icon(Icons.circle, size: 7, color: connectionError == null && status != 'Отключено' ? mpGreen : mpMuted), const SizedBox(width: 5), if (!compact) Text(status, style: const TextStyle(fontSize: 11))]))),
+            IconButton(tooltip: 'Повернуть экран', visualDensity: compact ? VisualDensity.compact : VisualDensity.standard, onPressed: () => toggleScreenOrientation(context), icon: Icon(Icons.screen_rotation, size: compact ? 18 : 23)),
+            Padding(padding: EdgeInsets.only(right: compact ? 4 : 10), child: Center(child: Row(children: [Icon(Icons.circle, size: 7, color: connectionError == null && status != 'Отключено' ? mpGreen : mpMuted), const SizedBox(width: 5), if (!compact) Text(status, style: const TextStyle(fontSize: 11))]))),
           ],
         ),
         body: SafeArea(child: connectionError == null ? pages[tab] : _connectionErrorView()),
-        bottomNavigationBar: connectionError == null ? _SharpBottomNav(compact: compact, selectedIndex: tab, onSelected: (value) => setState(() => tab = value), items: const [_SharpNavItem(Icons.grid_view, 'Deck'), _SharpNavItem(Icons.play_circle_outline, 'Media')]) : null,
+        bottomNavigationBar: connectionError == null
+            ? (compact ? _landscapeBottomDock() : _SharpBottomNav(selectedIndex: tab, onSelected: (value) => setState(() => tab = value), items: const [_SharpNavItem(Icons.grid_view, 'Deck'), _SharpNavItem(Icons.play_circle_outline, 'Media')]))
+            : null,
       ),
     );
   }
 
+  Widget _landscapeBottomDock() {
+    if (!landscapeNavExpanded) {
+      return SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 25,
+          child: Center(child: _landscapeChevron(Icons.keyboard_arrow_up, 'Открыть меню', () {
+            setState(() => landscapeNavExpanded = true);
+            _scheduleFit(animate: true);
+          })),
+        ),
+      );
+    }
+    return SafeArea(
+      top: false,
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        SizedBox(height: 24, child: Center(child: _landscapeChevron(Icons.keyboard_arrow_down, 'Скрыть меню', () {
+          setState(() => landscapeNavExpanded = false);
+          _scheduleFit(animate: true);
+        }))),
+        _SharpBottomNav(compact: true, selectedIndex: tab, onSelected: (value) => setState(() => tab = value), items: const [_SharpNavItem(Icons.grid_view, 'Deck'), _SharpNavItem(Icons.play_circle_outline, 'Media')]),
+      ]),
+    );
+  }
+
+  Widget _landscapeChevron(IconData icon, String tooltip, VoidCallback onTap) => Tooltip(
+        message: tooltip,
+        child: Material(
+          color: const Color(0xee202326),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: const BorderSide(color: mpBorder)),
+          child: InkWell(borderRadius: BorderRadius.circular(8), onTap: onTap, child: SizedBox(width: 54, height: 22, child: Icon(icon, size: 18, color: Colors.white))),
+        ),
+      );
+
   Widget _drawer({required bool compact}) {
-    final activeId = profile?.id;
+    final activeId = manualProfileRequestId ?? profile?.id;
     final saved = widget.savedDevices;
     return Drawer(
       width: compact ? 250 : null,
@@ -1087,8 +1165,8 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
     if (p == null) return const Center(child: CircularProgressIndicator());
     return Column(
       children: [
-        _pageSelector(p),
         Expanded(child: _deckCanvas(p)),
+        _pageSelector(p),
       ],
     );
   }
@@ -1097,7 +1175,7 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
     if (p.pages.length <= 1) return const SizedBox(height: 6);
     return Container(
       height: widget.formFactor == ClientFormFactor.phone && MediaQuery.orientationOf(context) == Orientation.landscape ? 34 : 48,
-      decoration: const BoxDecoration(color: mpPanel, border: Border(bottom: BorderSide(color: mpBorder))),
+      decoration: const BoxDecoration(color: mpPanel, border: Border(top: BorderSide(color: mpBorder))),
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         scrollDirection: Axis.horizontal,
@@ -1140,31 +1218,102 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
         final totalW = padBase * 2 + columns * cellW + (columns - 1) * gapBase;
         final totalH = padBase * 2 + rows * cellH + (rows - 1) * gapBase;
         final canvas = SizedBox(
-          width: totalW, height: totalH,
+          width: totalW,
+          height: totalH,
           child: Stack(children: [
-            for (final item in packed) Positioned(
-              left: padBase + item.column * (cellW + gapBase),
-              top: padBase + item.row * (cellH + gapBase),
-              width: item.columnSpan * cellW + (item.columnSpan - 1) * gapBase,
-              height: item.rowSpan * cellH + (item.rowSpan - 1) * gapBase,
-              child: _remoteTile(item.tile, uiScale),
-            ),
+            for (final item in packed)
+              Positioned(
+                left: padBase + item.column * (cellW + gapBase),
+                top: padBase + item.row * (cellH + gapBase),
+                width: item.columnSpan * cellW + (item.columnSpan - 1) * gapBase,
+                height: item.rowSpan * cellH + (item.rowSpan - 1) * gapBase,
+                child: _remoteTile(item.tile, uiScale),
+              ),
           ]),
         );
+
+        final viewport = Size(constraints.maxWidth, constraints.maxHeight);
+        final canvasSize = Size(totalW, totalH);
+        _lastDeckViewport = viewport;
+        _lastDeckCanvas = canvasSize;
+        final fitKey = '${compact ? 'L' : 'P'}:${p.id}:${p.pageId}:${landscapeNavExpanded ? 1 : 0}';
+        if (_lastAutoFitKey != fitKey) {
+          _lastAutoFitKey = fitKey;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _animateDeckTo(_fitMatrix(viewport, canvasSize), animate: true);
+          });
+        }
+
         return Stack(children: [
-          Center(child: InteractiveViewer(
-            transformationController: _deckTransform,
-            panEnabled: !viewLocked, scaleEnabled: !viewLocked,
-            minScale: .45, maxScale: 3.2, boundaryMargin: const EdgeInsets.all(500), constrained: false,
-            child: canvas,
-          )),
-          Positioned(right: compact ? 5 : 8, top: compact ? 5 : 8, child: Material(
-            color: const Color(0xee202326),
-            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: BorderSide(color: mpBorder)),
-            child: InkWell(onTap: _toggleViewLock, child: Padding(padding: EdgeInsets.all(compact ? 6 : 8), child: Icon(viewLocked ? Icons.lock : Icons.lock_open, size: compact ? 16 : 19, color: Colors.white))),
-          )),
+          Positioned.fill(
+            child: InteractiveViewer(
+              transformationController: _deckTransform,
+              panEnabled: !panLocked,
+              scaleEnabled: !scaleLocked,
+              minScale: .05,
+              maxScale: 3.2,
+              boundaryMargin: const EdgeInsets.all(900),
+              constrained: false,
+              alignment: Alignment.topLeft,
+              child: canvas,
+            ),
+          ),
+          Positioned(
+            right: compact ? 6 : 10,
+            top: compact ? 6 : 10,
+            child: Row(children: [
+              _viewControlButton(
+                tooltip: scaleLocked ? 'Разблокировать масштаб' : 'Зафиксировать текущий масштаб',
+                active: scaleLocked,
+                onTap: _toggleScaleLock,
+                icon: Icon(scaleLocked ? Icons.lock : Icons.lock_open, size: compact ? 16 : 19, color: Colors.white),
+                compact: compact,
+              ),
+              const SizedBox(width: 5),
+              _viewControlButton(
+                tooltip: panLocked ? 'Разблокировать перемещение' : 'Заблокировать перемещение',
+                active: panLocked,
+                onTap: _togglePanLock,
+                icon: _panLockIcon(compact ? 16 : 19),
+                compact: compact,
+              ),
+              const SizedBox(width: 5),
+              _viewControlButton(
+                tooltip: 'Вписать все ячейки и центрировать',
+                active: false,
+                onTap: () => _scheduleFit(animate: true),
+                icon: Icon(Icons.center_focus_strong, size: compact ? 16 : 19, color: Colors.white),
+                compact: compact,
+              ),
+            ]),
+          ),
         ]);
       },
+    );
+  }
+
+  Widget _viewControlButton({required String tooltip, required bool active, required VoidCallback onTap, required Widget icon, required bool compact}) => Tooltip(
+        message: tooltip,
+        child: Material(
+          color: active ? mpHover : const Color(0xee202326),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: active ? mpBlue : mpBorder)),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: onTap,
+            child: SizedBox(width: compact ? 31 : 36, height: compact ? 29 : 34, child: Center(child: icon)),
+          ),
+        ),
+      );
+
+  Widget _panLockIcon(double size) {
+    if (!panLocked) return Icon(Icons.pan_tool_alt_outlined, size: size, color: Colors.white);
+    return SizedBox(
+      width: size + 3,
+      height: size + 3,
+      child: Stack(children: [
+        Positioned(left: 0, bottom: 0, child: Icon(Icons.pan_tool_alt_outlined, size: size, color: Colors.white)),
+        Positioned(right: 0, top: 0, child: Icon(Icons.close, size: size * .62, color: Colors.white)),
+      ]),
     );
   }
 
@@ -1176,8 +1325,18 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
     return Material(
       color: blank ? mpPanel : mpPanel2,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: BorderSide(color: mpBorder, width: 1)),
-      child: InkWell(
-        onTap: blank ? null : () => _sendTile(tile),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: blank ? null : () async { await _haptic(); await _sendTile(tile); },
+        onLongPressStart: blank || profile?.longPressEnabled == false ? null : (_) async {
+          if (_holdingTiles.add(tile.id)) {
+            await _haptic();
+            await _sendTileHoldStart(tile);
+          }
+        },
+        onLongPressEnd: blank || profile?.longPressEnabled == false ? null : (_) async {
+          if (_holdingTiles.remove(tile.id)) await _sendTileHoldEnd(tile);
+        },
         child: Padding(
           padding: EdgeInsets.all(padding),
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -1243,7 +1402,13 @@ class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateM
   Widget _mediaButton(IconData icon, String label, String hotkey) => Material(
         color: mpPanel2,
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: BorderSide(color: mpBorder)),
-        child: InkWell(onTap: () => _sendHotkey(hotkey), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(icon, color: Colors.white, size: 30), const SizedBox(height: 7), Text(label, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white))])),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () async { await _haptic(); await _sendHotkey(hotkey); },
+          onLongPressStart: profile?.longPressEnabled == false ? null : (_) async { await _haptic(); await _sendHotkeyHoldStart(hotkey); },
+          onLongPressEnd: profile?.longPressEnabled == false ? null : (_) => _sendHotkeyHoldEnd(hotkey),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(icon, color: Colors.white, size: 30), const SizedBox(height: 7), Text(label, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white))]),
+        ),
       );
 }
 
@@ -1315,9 +1480,11 @@ class ProfileSnapshot {
   final String pageName;
   final int rows;
   final int columns;
+  final bool hapticFeedbackEnabled;
+  final bool longPressEnabled;
   final List<PageSummary> pages;
   final List<TileSnapshot> tiles;
-  const ProfileSnapshot({required this.id, required this.name, required this.icon, required this.pageId, required this.pageName, required this.rows, required this.columns, required this.pages, required this.tiles});
+  const ProfileSnapshot({required this.id, required this.name, required this.icon, required this.pageId, required this.pageName, required this.rows, required this.columns, required this.hapticFeedbackEnabled, required this.longPressEnabled, required this.pages, required this.tiles});
 
   factory ProfileSnapshot.fromJson(Map<String, dynamic> json) => ProfileSnapshot(
         id: '${json['id'] ?? ''}',
@@ -1327,6 +1494,8 @@ class ProfileSnapshot {
         pageName: '${json['pageName'] ?? 'Страница'}',
         rows: (json['rows'] as num?)?.toInt() ?? 3,
         columns: (json['columns'] as num?)?.toInt() ?? 4,
+        hapticFeedbackEnabled: json['hapticFeedback'] != false,
+        longPressEnabled: json['longPressEnabled'] != false,
         pages: ((json['pages'] ?? const []) as List).map((x) => PageSummary.fromJson(Map<String, dynamic>.from(x as Map))).toList(),
         tiles: ((json['tiles'] ?? const []) as List).map((item) => TileSnapshot.fromJson(Map<String, dynamic>.from(item as Map))).toList(),
       );

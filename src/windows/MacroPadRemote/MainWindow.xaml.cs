@@ -50,6 +50,15 @@ public partial class MainWindow : Window
     private double _fitScale = 1;
     private double _userZoom = 1;
     private Point _actionDragStart;
+    private Point _tileDragStart;
+    private Tile? _tileDragSource;
+    private readonly Dictionary<string, List<ushort>> _heldRemoteKeys = new();
+    private Window? _qrWindow;
+    private Window? _connectionWindow;
+    private StackPanel? _connectionDevicePanel;
+    private TextBlock? _connectionStatusText;
+    private TextBlock? _connectionDetailsText;
+    private ComboBox? _connectionTransportBox;
 
     public MainWindow()
     {
@@ -160,6 +169,7 @@ public partial class MainWindow : Window
             .OrderByDescending(x => x.IsOnline)
             .ThenByDescending(x => x.LastSeenUtc)
             .ToList();
+        RefreshConnectionDevicePanel();
     }
 
     private TrustedClient? TrustedById(string clientId)
@@ -190,6 +200,7 @@ public partial class MainWindow : Window
         device.LastSeenUtc = DateTime.UtcNow;
         SaveState();
         RefreshTrustedDevices();
+        Dispatcher.BeginInvoke(CloseQrWindow);
         return device;
     }
 
@@ -249,14 +260,135 @@ public partial class MainWindow : Window
             foreach (var pair in _clientIds.Where(x => x.Value == device.Id).ToList()) close.Add(pair.Key);
         foreach (var socket in close)
             try { await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Device forgotten", CancellationToken.None); } catch { }
-        if (_bleClientId == device.Id) { _bleAuthenticated = false; _bleClientId = ""; }
+        if (_bleClientId == device.Id) { ReleaseHeldHotkeysForClient(device.Id); _bleAuthenticated = false; _bleClientId = ""; }
         _state.TrustedDevices.RemoveAll(x => x.Id == device.Id);
         SaveState(); RefreshTrustedDevices(); UpdateConnectionStatus();
     }
 
-    private void HeaderSettingsButton_Click(object sender, RoutedEventArgs e)
+    private void HeaderSettingsButton_Click(object sender, RoutedEventArgs e) => OpenConnectionWindow();
+
+    private void ProfileSettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        SettingsPopup.IsOpen = !SettingsPopup.IsOpen;
+        ProfileSettingsPopup.IsOpen = !ProfileSettingsPopup.IsOpen;
+    }
+
+    private void OpenConnectionWindow()
+    {
+        if (_connectionWindow is { IsVisible: true })
+        {
+            _connectionWindow.Activate();
+            return;
+        }
+
+        var window = new Window
+        {
+            Owner = this,
+            Title = "NEXO — Подключение и устройства",
+            Width = 620,
+            Height = 560,
+            MinWidth = 540,
+            MinHeight = 470,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = (Brush)FindResource("Bg")
+        };
+        var tabs = new TabControl { Margin = new Thickness(14) };
+
+        var connectionTab = new TabItem { Header = "Подключение" };
+        var connectionPanel = new StackPanel { Margin = new Thickness(18) };
+        connectionPanel.Children.Add(new TextBlock { Text = "Способ подключения", Foreground = (Brush)FindResource("Muted"), FontSize = 11 });
+        var transport = new ComboBox { Height = 34, Margin = new Thickness(0, 5, 0, 12) };
+        transport.Items.Add(new ComboBoxItem { Content = "Wi‑Fi", Tag = "Wifi" });
+        transport.Items.Add(new ComboBoxItem { Content = "Bluetooth LE", Tag = "Bluetooth" });
+        transport.SelectionChanged += (_, _) =>
+        {
+            if (_updating || transport.SelectedItem is not ComboBoxItem selected) return;
+            var wanted = selected.Tag?.ToString() ?? "Wifi";
+            var target = TransportBox.Items.OfType<ComboBoxItem>().FirstOrDefault(x => x.Tag?.ToString() == wanted);
+            if (target is not null && !ReferenceEquals(TransportBox.SelectedItem, target)) TransportBox.SelectedItem = target;
+        };
+        _connectionTransportBox = transport;
+        connectionPanel.Children.Add(transport);
+        _connectionStatusText = new TextBlock { FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 5) };
+        connectionPanel.Children.Add(_connectionStatusText);
+        _connectionDetailsText = new TextBlock { Foreground = new SolidColorBrush(Color.FromRgb(134, 191, 239)), FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 16) };
+        connectionPanel.Children.Add(_connectionDetailsText);
+        var buttons = new Grid();
+        buttons.ColumnDefinitions.Add(new ColumnDefinition());
+        buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(120) });
+        var restart = new Button { Content = "Перезапустить связь", Height = 34, Margin = new Thickness(0, 0, 8, 0) };
+        restart.Click += ServerButton_Click;
+        var qr = new Button { Content = "QR-код", Height = 34 };
+        qr.Click += ShowQr_Click;
+        Grid.SetColumn(qr, 1);
+        buttons.Children.Add(restart);
+        buttons.Children.Add(qr);
+        connectionPanel.Children.Add(buttons);
+        connectionPanel.Children.Add(new TextBlock { Text = "После первой привязки устройство подключается без QR. Кнопка «Забыть» удаляет доверительный ключ и требует новую привязку.", Foreground = (Brush)FindResource("Muted"), FontSize = 10, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 14, 0, 0) });
+        connectionTab.Content = connectionPanel;
+
+        var devicesTab = new TabItem { Header = "Устройства" };
+        _connectionDevicePanel = new StackPanel { Margin = new Thickness(8) };
+        devicesTab.Content = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _connectionDevicePanel };
+
+        tabs.Items.Add(connectionTab);
+        tabs.Items.Add(devicesTab);
+        window.Content = tabs;
+        window.Closed += (_, _) =>
+        {
+            _connectionWindow = null;
+            _connectionDevicePanel = null;
+            _connectionStatusText = null;
+            _connectionDetailsText = null;
+            _connectionTransportBox = null;
+        };
+        _connectionWindow = window;
+        SyncConnectionWindow();
+        RefreshConnectionDevicePanel();
+        window.Show();
+    }
+
+    private void SyncConnectionWindow()
+    {
+        if (_connectionWindow is null) return;
+        _connectionStatusText!.Text = HeaderStatus.Text;
+        _connectionDetailsText!.Text = ConnectionDetails.Text;
+        if (_connectionTransportBox is not null)
+        {
+            var wanted = SelectedTransport();
+            _updating = true;
+            _connectionTransportBox.SelectedItem = _connectionTransportBox.Items.OfType<ComboBoxItem>().FirstOrDefault(x => x.Tag?.ToString() == wanted);
+            _updating = false;
+        }
+    }
+
+    private void RefreshConnectionDevicePanel()
+    {
+        if (_connectionDevicePanel is null) return;
+        _connectionDevicePanel.Children.Clear();
+        var devices = _state.TrustedDevices.OrderByDescending(x => x.IsOnline).ThenByDescending(x => x.LastSeenUtc).ToList();
+        if (devices.Count == 0)
+        {
+            _connectionDevicePanel.Children.Add(new TextBlock { Text = "Привязанных устройств пока нет.", Foreground = (Brush)FindResource("Muted"), Margin = new Thickness(8) });
+            return;
+        }
+        foreach (var device in devices)
+        {
+            var row = new Grid { Height = 62, Margin = new Thickness(0, 0, 0, 6), Background = (Brush)FindResource("Panel2") };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(44) });
+            row.ColumnDefinitions.Add(new ColumnDefinition());
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
+            row.Children.Add(new TextBlock { Text = device.DeviceGlyph, FontSize = 22, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
+            var info = new StackPanel { Margin = new Thickness(6, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center };
+            info.Children.Add(new TextBlock { Text = device.Name, FontWeight = FontWeights.SemiBold });
+            info.Children.Add(new TextBlock { Text = device.Details, Foreground = (Brush)FindResource("Muted"), FontSize = 10, Margin = new Thickness(0, 3, 0, 0) });
+            Grid.SetColumn(info, 1);
+            row.Children.Add(info);
+            var dots = new Button { Content = "⋮", FontSize = 19, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Tag = device, ToolTip = "Меню устройства" };
+            dots.Click += TrustedDeviceMenu_Click;
+            Grid.SetColumn(dots, 2);
+            row.Children.Add(dots);
+            _connectionDevicePanel.Children.Add(row);
+        }
     }
 
     private static Profile DefaultProfile(string name, string icon)
@@ -351,6 +483,8 @@ public partial class MainWindow : Window
         ProfileTitle.Text = _profile.Name;
         ProfileName.Text = _profile.Name;
         ProfileDescription.Text = _profile.Description;
+        ProfileHaptics.IsChecked = _profile.HapticFeedback;
+        ProfileLongPress.IsChecked = _profile.LongPressEnabled;
         ColumnsBox.Text = _page.Columns.ToString();
         RowsBox.Text = _page.Rows.ToString();
         _userZoom = Math.Clamp(_page.Zoom, ZoomSlider.Minimum, ZoomSlider.Maximum);
@@ -500,6 +634,8 @@ public partial class MainWindow : Window
 
         button.Click += (_, _) => SelectTile(button, tile);
         button.MouseDoubleClick += (_, _) => FocusTile(button);
+        button.PreviewMouseLeftButtonDown += Tile_PreviewMouseLeftButtonDown;
+        button.PreviewMouseMove += Tile_PreviewMouseMove;
         button.DragOver += Tile_DragOver;
         button.Drop += Tile_Drop;
         button.ContextMenu = TileMenu(tile);
@@ -604,17 +740,52 @@ public partial class MainWindow : Window
         RefreshInspector();
     }
 
+    private void Tile_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not Button { Tag: Tile tile }) return;
+        _tileDragStart = e.GetPosition(this);
+        _tileDragSource = tile;
+    }
+
+    private void Tile_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || _tileDragSource is null || sender is not Button button) return;
+        var current = e.GetPosition(this);
+        if (Math.Abs(current.X - _tileDragStart.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(current.Y - _tileDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        var source = _tileDragSource;
+        _tileDragSource = null;
+        DragDrop.DoDragDrop(button, new DataObject("NexoTile", source), DragDropEffects.Move);
+        e.Handled = true;
+    }
+
     private void Tile_DragOver(object sender, DragEventArgs e)
     {
-        e.Effects = e.Data.GetDataPresent("MacroPadAction") ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Effects = e.Data.GetDataPresent("NexoTile") ? DragDropEffects.Move
+            : e.Data.GetDataPresent("MacroPadAction") ? DragDropEffects.Copy
+            : DragDropEffects.None;
         e.Handled = true;
     }
 
     private void Tile_Drop(object sender, DragEventArgs e)
     {
-        if (sender is not Button { Tag: Tile tile } button || e.Data.GetData("MacroPadAction") is not ActionItem action) return;
-        AssignAction(tile, action);
-        SelectTile(button, tile);
+        if (sender is not Button { Tag: Tile target } button) return;
+        if (e.Data.GetData("NexoTile") is Tile source && _page is not null)
+        {
+            var sourceIndex = _page.Tiles.IndexOf(source);
+            var targetIndex = _page.Tiles.IndexOf(target);
+            if (sourceIndex >= 0 && targetIndex >= 0 && sourceIndex != targetIndex)
+            {
+                (_page.Tiles[sourceIndex], _page.Tiles[targetIndex]) = (_page.Tiles[targetIndex], _page.Tiles[sourceIndex]);
+                SaveState();
+                RebuildGrid();
+                _ = BroadcastSnapshotAsync();
+            }
+            e.Handled = true;
+            return;
+        }
+        if (e.Data.GetData("MacroPadAction") is not ActionItem action) return;
+        AssignAction(target, action);
+        SelectTile(button, target);
         SaveAndBroadcast();
         e.Handled = true;
     }
@@ -900,10 +1071,13 @@ public partial class MainWindow : Window
         if (_profile is null || _page is null) return;
         if (!string.IsNullOrWhiteSpace(ProfileName.Text)) _profile.Name = ProfileName.Text.Trim();
         _profile.Description = ProfileDescription.Text.Trim();
+        _profile.HapticFeedback = ProfileHaptics.IsChecked != false;
+        _profile.LongPressEnabled = ProfileLongPress.IsChecked != false;
         var columns = int.TryParse(ColumnsBox.Text, out var c) ? Math.Clamp(c, 1, 12) : _page.Columns;
         var rows = int.TryParse(RowsBox.Text, out var r) ? Math.Clamp(r, 1, 12) : _page.Rows;
         if (ConfiguredArea(_page) > columns * rows) { MessageBox.Show(this, "Новая сетка слишком мала для уже настроенных плиток.", "NEXO"); return; }
         _page.Columns = columns; _page.Rows = rows; EnsureCapacity(_page); SaveState(); RefreshProfiles(); _ = BroadcastSnapshotAsync();
+        ProfileSettingsPopup.IsOpen = false;
     }
 
     private void UpdateZoom()
@@ -997,7 +1171,10 @@ public partial class MainWindow : Window
     {
         await StopWifiAsync();
         if (!string.IsNullOrWhiteSpace(_bleClientId))
+        {
+            ReleaseHeldHotkeysForClient(_bleClientId);
             MarkTrustedClient(_bleClientId, false, "Bluetooth");
+        }
         _bleClientId = "";
         await _ble.StopAsync();
         _bleAuthenticated = false;
@@ -1074,7 +1251,7 @@ public partial class MainWindow : Window
         }
         foreach (var socket in sockets)
             try { await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Server stopped", CancellationToken.None); } catch { }
-        foreach (var id in clientIds) MarkTrustedClient(id, false, "Wi‑Fi");
+        foreach (var id in clientIds) { ReleaseHeldHotkeysForClient(id); MarkTrustedClient(id, false, "Wi‑Fi"); }
         UpdateConnectionStatus();
     }
 
@@ -1163,7 +1340,7 @@ public partial class MainWindow : Window
                 _clientIds.Remove(socket);
                 stillOnline = _clientIds.Values.Any(x => x == clientId);
             }
-            if (!stillOnline) MarkTrustedClient(clientId, false, "Wi‑Fi");
+            if (!stillOnline) { ReleaseHeldHotkeysForClient(clientId); MarkTrustedClient(clientId, false, "Wi‑Fi"); }
             Dispatcher.Invoke(UpdateConnectionStatus);
         }
     }
@@ -1278,6 +1455,36 @@ public partial class MainWindow : Window
                 return;
             }
 
+            if ((messageType == "pressStart" || messageType == "pressEnd") && root.TryGetProperty("tileId", out var holdTileProp))
+            {
+                var tileId = holdTileProp.GetString() ?? "";
+                var tile = _state.Profiles.SelectMany(p => p.Pages).SelectMany(p => p.Tiles).FirstOrDefault(t => t.Id == tileId);
+                if (tile is not null)
+                {
+                    var holdId = $"{clientId}:{tileId}";
+                    var hotkey = tile.ActionType == "hotkey" ? tile.Hotkey : tile.ActionType == "media" ? tile.ActionValue : "";
+                    if (messageType == "pressStart")
+                    {
+                        if (!string.IsNullOrWhiteSpace(hotkey)) StartHeldHotkey(holdId, hotkey);
+                        else
+                        {
+                            var task = await Dispatcher.InvokeAsync(() => ExecuteTileAsync(tile));
+                            await task;
+                        }
+                    }
+                    else EndHeldHotkey(holdId);
+                }
+                return;
+            }
+
+            if ((messageType == "hotkeyStart" || messageType == "hotkeyEnd") && root.TryGetProperty("hotkey", out var heldHotkeyProp))
+            {
+                var hotkey = heldHotkeyProp.GetString() ?? "";
+                var holdId = $"{clientId}:hotkey:{hotkey}";
+                if (messageType == "hotkeyStart") StartHeldHotkey(holdId, hotkey); else EndHeldHotkey(holdId);
+                return;
+            }
+
             if (root.TryGetProperty("tileId", out var tileIdProp))
             {
                 var tileId = tileIdProp.GetString();
@@ -1345,6 +1552,7 @@ public partial class MainWindow : Window
             HeaderDot.Foreground = (Brush)FindResource("Muted");
         }
         RefreshTrustedDevices();
+        SyncConnectionWindow();
     }
 
     private void ShowQr_Click(object sender, RoutedEventArgs e)
@@ -1374,7 +1582,10 @@ public partial class MainWindow : Window
             bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad; bitmap.StreamSource = stream; bitmap.EndInit(); bitmap.Freeze();
         }
 
+        CloseQrWindow();
         var window = new Window { Owner = this, Title = "Быстрое подключение", Width = 440, Height = 525, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = (Brush)FindResource("Bg") };
+        _qrWindow = window;
+        window.Closed += (_, _) => { if (ReferenceEquals(_qrWindow, window)) _qrWindow = null; };
         var panel = new StackPanel { Margin = new Thickness(22) };
         panel.Children.Add(new TextBlock { Text = "Подключить телефон", FontSize = 22, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center });
         panel.Children.Add(new TextBlock { Text = caption, Foreground = (Brush)FindResource("Muted"), TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 14) });
@@ -1383,6 +1594,13 @@ public partial class MainWindow : Window
         panel.Children.Add(qrBorder);
         panel.Children.Add(new TextBlock { Text = "Отсканируйте QR в мобильном приложении NEXO", TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 14, 0, 0) });
         window.Content = panel; window.ShowDialog();
+    }
+
+    private void CloseQrWindow()
+    {
+        if (_qrWindow is null) return;
+        try { _qrWindow.Close(); } catch { }
+        _qrWindow = null;
     }
 
     private object Snapshot(string? deviceToken = null)
@@ -1400,6 +1618,8 @@ public partial class MainWindow : Window
                 pageName = _page.Name,
                 rows = _page.Rows,
                 columns = _page.Columns,
+                hapticFeedback = _profile.HapticFeedback,
+                longPressEnabled = _profile.LongPressEnabled,
                 pages = _profile.Pages.Select(pg => new { id = pg.Id, name = pg.Name }).ToList(),
                 tiles = _page.Tiles.Select(t => new
                 {
@@ -1633,9 +1853,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private static void ExecuteHotkey(string hotkey)
+    private static List<ushort> ParseHotkeyKeys(string hotkey)
     {
-        if (string.IsNullOrWhiteSpace(hotkey)) return;
+        if (string.IsNullOrWhiteSpace(hotkey)) return new List<ushort>();
         var tokens = hotkey.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var keys = new List<ushort>();
         foreach (var token in tokens)
@@ -1645,11 +1865,46 @@ public partial class MainWindow : Window
         }
         if (keys.Count == 0)
             throw new InvalidOperationException($"Не удалось распознать сочетание «{hotkey}».");
+        return keys;
+    }
 
+    private static void ExecuteHotkey(string hotkey)
+    {
+        var keys = ParseHotkeyKeys(hotkey);
+        if (keys.Count == 0) return;
         var inputs = new List<INPUT>();
         foreach (var vk in keys) inputs.Add(KeyInput(vk, false));
         for (var i = keys.Count - 1; i >= 0; i--) inputs.Add(KeyInput(keys[i], true));
         SendInputs(inputs);
+    }
+
+    private void StartHeldHotkey(string holdId, string hotkey)
+    {
+        if (string.IsNullOrWhiteSpace(holdId) || string.IsNullOrWhiteSpace(hotkey)) return;
+        EndHeldHotkey(holdId);
+        var keys = ParseHotkeyKeys(hotkey);
+        if (keys.Count == 0) return;
+        SendInputs(keys.Select(vk => KeyInput(vk, false)).ToList());
+        lock (_heldRemoteKeys) _heldRemoteKeys[holdId] = keys;
+    }
+
+    private void EndHeldHotkey(string holdId)
+    {
+        List<ushort>? keys;
+        lock (_heldRemoteKeys)
+        {
+            if (!_heldRemoteKeys.Remove(holdId, out keys) || keys is null) return;
+        }
+        var inputs = new List<INPUT>();
+        for (var i = keys.Count - 1; i >= 0; i--) inputs.Add(KeyInput(keys[i], true));
+        SendInputs(inputs);
+    }
+
+    private void ReleaseHeldHotkeysForClient(string clientId)
+    {
+        List<string> ids;
+        lock (_heldRemoteKeys) ids = _heldRemoteKeys.Keys.Where(x => x.StartsWith(clientId + ":", StringComparison.Ordinal)).ToList();
+        foreach (var id in ids) EndHeldHotkey(id);
     }
 
     private static INPUT KeyInput(ushort vk, bool up) => new()
@@ -1712,6 +1967,8 @@ public sealed class Profile
     public string Name { get; set; } = "Profile";
     public string Icon { get; set; } = "•";
     public string Description { get; set; } = "";
+    public bool HapticFeedback { get; set; } = true;
+    public bool LongPressEnabled { get; set; } = true;
     public string ActivePageId { get; set; } = "";
     public List<DeckPage> Pages { get; set; } = new();
 }
