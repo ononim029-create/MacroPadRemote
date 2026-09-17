@@ -402,8 +402,8 @@ def patch_mobile() -> None:
 
     text = replace_once(
         text,
-        "      child: PopScope(\\n        canPop: false,\\n        child: Scaffold(",
-        "      child: PopScope(\\n        canPop: _remoteRevoked,\\n        child: Scaffold(",
+        "      child: PopScope(\n        canPop: false,\n        child: Scaffold(",
+        "      child: PopScope(\n        canPop: _remoteRevoked,\n        child: Scaffold(",
         "allow route pop after remote revocation",
     )
 
