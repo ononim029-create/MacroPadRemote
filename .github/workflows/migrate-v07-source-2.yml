@@ -1,0 +1,55 @@
+name: Migrate v0.7 sources retry
+on:
+  push:
+    branches: [work/v0.8-reliability]
+permissions:
+  contents: write
+jobs:
+  migrate:
+    if: ${{ !contains(github.event.head_commit.message, '[source-migrated]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: work/v0.8-reliability
+          fetch-depth: 0
+      - name: Restore verified v0.7 source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            bootstrap/v07_payload_00_0 bootstrap/v07_payload_00_1 bootstrap/v07_payload_00_2 bootstrap/v07_payload_00_3 \
+            bootstrap/v07_payload_01_0 bootstrap/v07_payload_01_1 bootstrap/v07_payload_01_2 bootstrap/v07_payload_01_3 \
+            bootstrap/v07safe_02_0 bootstrap/v07safe_02_1 bootstrap/v07safe_02_2 bootstrap/v07safe_02_3 \
+            bootstrap/v07safe_03_0 bootstrap/v07safe_03_1 bootstrap/v07safe_03_2 bootstrap/v07safe_03_3 \
+            | base64 -d > /tmp/v07.tar.xz
+          echo 'e2efec5be8b9b830e241f1d35e666e680d054b90305b5f29eaf4599ecda9993b  /tmp/v07.tar.xz' | sha256sum -c -
+          rm -rf /tmp/v07src && mkdir -p /tmp/v07src
+          tar -xJf /tmp/v07.tar.xz -C /tmp/v07src
+      - name: Store restored sources directly
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf src/windows/MacroPadRemote
+          mkdir -p src/windows/MacroPadRemote
+          for f in App.xaml App.xaml.cs MacroPadRemote.csproj MainWindow.xaml MainWindow.xaml.cs V06GlobalUsings.cs BleGattServer.cs LanDiscoveryService.cs; do cp "/tmp/v07src/windows/$f" src/windows/MacroPadRemote/; done
+          mkdir -p src/mobile/macropad_mobile/lib
+          cp /tmp/v07src/mobile/pubspec.yaml src/mobile/macropad_mobile/pubspec.yaml
+          cp /tmp/v07src/mobile/lib/main.dart src/mobile/macropad_mobile/lib/main.dart
+          python3 - <<'PYFIX'
+          from pathlib import Path
+          p = Path('src/mobile/macropad_mobile/lib/main.dart')
+          s = p.read_text()
+          s = s.replace('Navigator.of(this.context).pop(pc.serverId);', 'Navigator.of(context).pop(pc.serverId);')
+          s = s.replace('for (var x = 0; x < cs; x++) used[row + y][column + x] = true;', 'for (var x = 0; x < cs; x++) {\n            used[row + y][column + x] = true;\n          }')
+          p.write_text(s)
+          PYFIX
+      - name: Commit source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src
+          git commit -m 'Store verified v0.7 sources directly [source-migrated]'
+          git push origin HEAD:work/v0.8-reliability
