@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <AssemblyName>MacroPadRemote</AssemblyName>
+    <AssemblyName>NEXO</AssemblyName>
     <Product>NEXO</Product>
     <Version>0.9.0</Version>
     <InformationalVersion>0.9.0-preview</InformationalVersion>
