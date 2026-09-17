@@ -23,7 +23,7 @@
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="▦" FontSize="23" FontWeight="Bold" Margin="0,0,10,0"/>
                     <TextBlock Text="NEXO" FontSize="18" FontWeight="SemiBold"/>
-                    <TextBlock Text="  v0.8 preview" FontSize="11" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                    <TextBlock Text="  v1.0 preview" FontSize="11" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                     <Border Background="#202326" BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="10,5" Margin="0,0,8,0">
@@ -42,7 +42,7 @@
         <!-- Left: profiles + devices -->
         <Border Grid.Row="1" Grid.RowSpan="2" Grid.Column="0" Background="#1B1D1F" BorderBrush="{StaticResource Border}" BorderThickness="0,0,1,0">
             <Grid>
-                <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="1"/><RowDefinition Height="330"/></Grid.RowDefinitions>
+                <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="0"/><RowDefinition Height="0"/></Grid.RowDefinitions>
                 <Grid Grid.Row="0">
                     <Grid.RowDefinitions><RowDefinition Height="58"/><RowDefinition Height="*"/><RowDefinition Height="50"/></Grid.RowDefinitions>
                     <Grid Margin="18,0,12,0">
@@ -123,7 +123,7 @@
                     <StackPanel Orientation="Horizontal"><TextBlock x:Name="ProfileTitle" Text="Revit" FontSize="25" FontWeight="SemiBold"/><TextBlock Text="  ✎" FontSize="18" Foreground="{StaticResource Muted}"/></StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,5,0,0"><TextBlock x:Name="GridInfo" Text="12 ячеек" Foreground="{StaticResource Muted}"/><TextBlock Text="  •  " Foreground="{StaticResource Muted}"/><TextBlock x:Name="PageInfo" Text="Страница 1 из 1" Foreground="{StaticResource Muted}"/></StackPanel>
                 </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><ComboBox x:Name="PageBox" Width="170" DisplayMemberPath="Name" SelectionChanged="PageBox_SelectionChanged"/><Button Content="＋" Width="38" Margin="7,0,0,0" Click="AddPage_Click" ToolTip="Добавить страницу"/></StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="ProfileSettingsButton" Content="⚙" Width="38" Height="32" Click="ProfileSettingsButton_Click" ToolTip="Свойства профиля"/></StackPanel>
             </Grid>
             <Border Grid.Row="1" Margin="24,0" Background="#141618" BorderBrush="{StaticResource Border}" BorderThickness="1">
                 <ScrollViewer x:Name="DeckViewport" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Padding="24" PreviewMouseWheel="DeckViewport_PreviewMouseWheel" SizeChanged="DeckViewport_SizeChanged">
@@ -133,101 +133,30 @@
             <Grid Grid.Row="2" Margin="20,5"><StackPanel x:Name="PageButtons" Orientation="Horizontal" HorizontalAlignment="Center"/></Grid>
         </Grid>
 
-        <!-- Bottom profile properties -->
+        <!-- Bottom action properties -->
         <Border Grid.Row="2" Grid.Column="1" Background="#191B1D" BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0">
-            <Grid Margin="20,12">
-                <Grid.RowDefinitions><RowDefinition Height="34"/><RowDefinition/></Grid.RowDefinitions>
-                <TextBlock Text="Свойства профиля" FontSize="15" FontWeight="SemiBold"/>
-                <Grid Grid.Row="1">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="1.25*"/><ColumnDefinition Width="1"/><ColumnDefinition Width="0.9*"/><ColumnDefinition Width="1"/><ColumnDefinition Width="1.05*"/></Grid.ColumnDefinitions>
-                    <Grid Grid.Column="0" Margin="0,0,16,0">
-                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="34"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                        <TextBlock Text="Название" Foreground="{StaticResource Muted}" FontSize="11"/><TextBox x:Name="ProfileName" Grid.Row="1"/>
-                        <TextBlock Grid.Row="2" Text="Описание" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,7,0,3"/><TextBox x:Name="ProfileDescription" Grid.Row="3" AcceptsReturn="True" TextWrapping="Wrap"/>
-                    </Grid>
-                    <Border Grid.Column="1" Background="{StaticResource Border}"/>
-                    <Grid Grid.Column="2" Margin="16,0">
-                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="58"/><RowDefinition Height="Auto"/><RowDefinition Height="42"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                        <TextBlock Text="Сетка макропада" FontWeight="SemiBold" FontSize="12"/>
-                        <Grid Grid.Row="1" Margin="0,5,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="10"/><ColumnDefinition/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Столбцы" Foreground="{StaticResource Muted}" FontSize="11"/><TextBox x:Name="ColumnsBox" Height="32"/></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="Строки" Foreground="{StaticResource Muted}" FontSize="11"/><TextBox x:Name="RowsBox" Height="32"/></StackPanel></Grid>
-                        <TextBlock Grid.Row="2" Text="Масштаб" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,7,0,2"/><Slider x:Name="ZoomSlider" Grid.Row="3" Minimum="0.55" Maximum="2.5" Value="1" ValueChanged="ZoomSlider_ValueChanged"/>
-                        <TextBlock Grid.Row="4" Text="Ctrl + колесо — масштаб. Двойной клик — приблизить плитку. ПКМ — размер ячейки." Foreground="#89BFEF" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"/>
-                    </Grid>
-                    <Border Grid.Column="3" Background="{StaticResource Border}"/>
-                    <Grid Grid.Column="4" Margin="16,0,0,0">
-                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition/><RowDefinition Height="38"/></Grid.RowDefinitions>
-                        <TextBlock Text="Дополнительные функции" FontWeight="SemiBold" FontSize="12"/>
-                        <StackPanel Grid.Row="1" Margin="0,6,0,0"><CheckBox x:Name="ShowNumbers" Content="Показывать номера клавиш" IsChecked="True"/><CheckBox x:Name="ShowLabels" Content="Показывать подписи" IsChecked="True" Margin="0,4,0,0"/><CheckBox Content="Виброотклик на телефоне" IsChecked="True" Margin="0,4,0,0"/><CheckBox Content="Длинное нажатие" IsChecked="True" Margin="0,4,0,0"/></StackPanel>
-                        <Button Grid.Row="2" Content="Сохранить" HorizontalAlignment="Right" Width="118" Click="SaveProfile_Click"/>
-                    </Grid>
+            <ScrollViewer VerticalScrollBarVisibility="Auto"><Grid Margin="18,10">
+                <Grid.RowDefinitions><RowDefinition Height="28"/><RowDefinition/></Grid.RowDefinitions>
+                <TextBlock Text="Свойства действия" FontSize="15" FontWeight="SemiBold"/>
+                <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="1.1*"/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                    <StackPanel Margin="0,0,12,0"><TextBlock x:Name="InspectorHint" Text="Выберите плитку." Foreground="{StaticResource Muted}" FontSize="10"/><TextBlock Text="Название" Foreground="{StaticResource Muted}" FontSize="10"/><TextBox x:Name="InspectorTitleBox" Height="30" TextChanged="InspectorChanged"/><CheckBox x:Name="InspectorShowLabel" Content="Показывать название функции" IsChecked="True" Margin="0,5,0,0"/></StackPanel>
+                    <StackPanel Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="Тип действия" Foreground="{StaticResource Muted}" FontSize="10"/><TextBox x:Name="InspectorTypeBox" Height="30" IsReadOnly="True"/><TextBlock x:Name="InspectorValueLabel" Text="Параметр" Foreground="{StaticResource Muted}" FontSize="10" Margin="0,5,0,0"/><TextBox x:Name="InspectorValueBox" Height="30" TextChanged="InspectorChanged"/></StackPanel>
+                    <StackPanel Grid.Column="2"><TextBlock Text="Горячая клавиша" Foreground="{StaticResource Muted}" FontSize="10"/><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="90"/></Grid.ColumnDefinitions><TextBox x:Name="InspectorHotkeyBox" Height="30" IsReadOnly="True"/><Button x:Name="RecordHotkeyButton" Grid.Column="1" Content="Записать" Margin="5,0,0,0" Click="RecordHotkey_Click" PreviewKeyDown="RecordHotkey_PreviewKeyDown"/></Grid><StackPanel Orientation="Horizontal" Margin="0,8,0,0"><Border x:Name="InspectorIconPreview" Width="38" Height="38" Background="#111315" BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="4"/><TextBlock x:Name="InspectorIconStatus" Width="70" Margin="6,0" VerticalAlignment="Center" FontSize="9"/><Button x:Name="IconLibraryButton" Content="Иконка" Width="66" Click="IconLibrary_Click"/><Button x:Name="IconImportButton" Content="Импорт" Width="62" Margin="5,0,0,0" Click="IconImport_Click"/><Button x:Name="IconScreenshotButton" Content="Снимок" Width="62" Margin="5,0,0,0" Click="IconScreenshot_Click"/><Button x:Name="IconResetButton" Content="Авто" Width="52" Margin="5,0,0,0" Click="IconReset_Click"/></StackPanel><StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0"><Button Content="Очистить" Width="84" Click="ClearTile_Click"/><Button Content="Применить" Width="94" Margin="6,0,0,0" Click="ApplyInspector_Click"/></StackPanel></StackPanel>
                 </Grid>
-            </Grid>
+            </Grid></ScrollViewer>
         </Border>
 
-        <!-- Right: Stream Deck-style action library + property inspector -->
+        <!-- Right: action library -->
         <Border Grid.Row="1" Grid.RowSpan="2" Grid.Column="2" Background="#1B1D1F" BorderBrush="{StaticResource Border}" BorderThickness="1,0,0,0">
-            <Grid>
-                <Grid.RowDefinitions><RowDefinition Height="60"/><RowDefinition Height="*"/><RowDefinition Height="6"/><RowDefinition Height="315"/></Grid.RowDefinitions>
-                <Grid Margin="14,12">
-                    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="38"/></Grid.ColumnDefinitions>
-                    <TextBox x:Name="ActionSearchBox" Height="34" VerticalContentAlignment="Center" ToolTip="Поиск действий" TextChanged="ActionSearchBox_TextChanged"/>
-                    <Button Grid.Column="1" Content="☷" Margin="6,0,0,0" Padding="0" ToolTip="Каталог действий"/>
-                </Grid>
-
-                <TabControl Grid.Row="1" x:Name="ActionTabs">
-                    <TabItem Header="Клавиша">
-                        <ListBox x:Name="ActionLibraryList" Margin="8" PreviewMouseLeftButtonDown="ActionLibrary_PreviewMouseLeftButtonDown" PreviewMouseMove="ActionLibrary_PreviewMouseMove" MouseDoubleClick="ActionLibrary_DoubleClick">
-                            <ListBox.ItemTemplate>
-                                <DataTemplate>
-                                    <Grid Margin="7,6">
-                                        <Grid.ColumnDefinitions><ColumnDefinition Width="34"/><ColumnDefinition/></Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding Icon}" FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                        <StackPanel Grid.Column="1" Margin="8,0,0,0"><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Description}" Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap"/></StackPanel>
-                                    </Grid>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                            <ListBox.GroupStyle>
-                                <GroupStyle>
-                                    <GroupStyle.HeaderTemplate>
-                                        <DataTemplate><Border Background="#202326" BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,1" Padding="10,8"><TextBlock Text="{Binding Name}" FontWeight="SemiBold"/></Border></DataTemplate>
-                                    </GroupStyle.HeaderTemplate>
-                                </GroupStyle>
-                            </ListBox.GroupStyle>
-                        </ListBox>
-                    </TabItem>
-                    <TabItem Header="Информационная">
-                        <StackPanel Margin="14"><TextBlock Text="Информационные плитки" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="Дата и время" Margin="0,14,0,4"/><TextBlock Text="Статус подключения" Margin="0,4"/><TextBlock Text="Текст / заметка" Margin="0,4"/><TextBlock Text="Системная информация" Margin="0,4"/></StackPanel>
-                    </TabItem>
-                </TabControl>
-
-                <GridSplitter Grid.Row="2" Height="6" HorizontalAlignment="Stretch" Background="#101214"/>
-
-                <Border Grid.Row="3" BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Background="#191B1D">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <StackPanel Margin="14,12">
-                            <TextBlock Text="Свойства действия" FontSize="15" FontWeight="SemiBold"/>
-                            <TextBlock x:Name="InspectorHint" Text="Выберите плитку или перетащите действие на рабочее поле." Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,10"/>
-                            <TextBlock Text="Название" Foreground="{StaticResource Muted}" FontSize="10"/><TextBox x:Name="InspectorTitleBox" Height="32" Margin="0,3,0,5" TextChanged="InspectorChanged"/>
-                            <CheckBox x:Name="InspectorShowLabel" Content="Показывать название функции на этой клавише" IsChecked="True" Margin="0,0,0,8"/>
-                            <TextBlock Text="Тип действия" Foreground="{StaticResource Muted}" FontSize="10"/><TextBox x:Name="InspectorTypeBox" Height="32" Margin="0,3,0,8" IsReadOnly="True"/>
-                            <TextBlock x:Name="InspectorValueLabel" Text="Параметр" Foreground="{StaticResource Muted}" FontSize="10"/><TextBox x:Name="InspectorValueBox" Height="32" Margin="0,3,0,8" TextChanged="InspectorChanged"/>
-                            <TextBlock Text="Горячая клавиша" Foreground="{StaticResource Muted}" FontSize="10"/>
-                            <Grid Margin="0,3,0,8"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="112"/></Grid.ColumnDefinitions><TextBox x:Name="InspectorHotkeyBox" Height="32" IsReadOnly="True"/><Button x:Name="RecordHotkeyButton" Grid.Column="1" Content="Записать" Margin="6,0,0,0" Click="RecordHotkey_Click" PreviewKeyDown="RecordHotkey_PreviewKeyDown"/></Grid>
-                            <TextBlock Text="Иконка" Foreground="{StaticResource Muted}" FontSize="10"/>
-                            <Grid Margin="0,4,0,9">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition/><ColumnDefinition Width="88"/></Grid.ColumnDefinitions>
-                                <Border x:Name="InspectorIconPreview" Width="42" Height="42" Background="#111315" BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="5"/>
-                                <StackPanel Grid.Column="1" Margin="7,0,7,0" VerticalAlignment="Center"><TextBlock x:Name="InspectorIconStatus" Text="Автоматически" FontSize="10" TextWrapping="Wrap"/><Button x:Name="IconLibraryButton" Content="Библиотека…" Height="25" Margin="0,3,0,0" Click="IconLibrary_Click"/></StackPanel>
-                                <StackPanel Grid.Column="2"><Button x:Name="IconImportButton" Content="Импорт" Height="25" Click="IconImport_Click"/><Button x:Name="IconScreenshotButton" Content="Снимок" Height="25" Margin="0,3,0,0" Click="IconScreenshot_Click"/></StackPanel>
-                            </Grid>
-                            <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="90"/></Grid.ColumnDefinitions><TextBlock Text="ПКМ по пользовательской иконке в библиотеке — удалить." Foreground="{StaticResource Muted}" FontSize="9" TextWrapping="Wrap" VerticalAlignment="Center"/><Button x:Name="IconResetButton" Grid.Column="1" Content="Авто" Height="26" Click="IconReset_Click"/></Grid>
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="Очистить" Width="84" Margin="0,0,7,0" Click="ClearTile_Click"/><Button Content="Применить" Width="94" Click="ApplyInspector_Click"/></StackPanel>
-                        </StackPanel>
-                    </ScrollViewer>
-                </Border>
+            <Grid><Grid.RowDefinitions><RowDefinition Height="60"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <Grid Margin="14,12"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="38"/></Grid.ColumnDefinitions><TextBox x:Name="ActionSearchBox" Height="34" VerticalContentAlignment="Center" ToolTip="Поиск действий" TextChanged="ActionSearchBox_TextChanged"/><Button Grid.Column="1" Content="☷" Margin="6,0,0,0" Padding="0"/></Grid>
+                <TabControl Grid.Row="1" x:Name="ActionTabs"><TabItem Header="Клавиша"><ListBox x:Name="ActionLibraryList" Margin="8" PreviewMouseLeftButtonDown="ActionLibrary_PreviewMouseLeftButtonDown" PreviewMouseMove="ActionLibrary_PreviewMouseMove" MouseDoubleClick="ActionLibrary_DoubleClick"><ListBox.ItemTemplate><DataTemplate><Grid Margin="7,6"><Grid.ColumnDefinitions><ColumnDefinition Width="34"/><ColumnDefinition/></Grid.ColumnDefinitions><TextBlock Text="{Binding Icon}" FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center"/><StackPanel Grid.Column="1" Margin="8,0,0,0"><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Description}" Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap"/></StackPanel></Grid></DataTemplate></ListBox.ItemTemplate><ListBox.GroupStyle><GroupStyle><GroupStyle.HeaderTemplate><DataTemplate><Border Background="#202326" BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,1" Padding="10,8"><TextBlock Text="{Binding Name}" FontWeight="SemiBold"/></Border></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle></ListBox.GroupStyle></ListBox></TabItem><TabItem Header="Информационная"><StackPanel Margin="14"><TextBlock Text="Информационные плитки" FontSize="16" FontWeight="SemiBold"/></StackPanel></TabItem></TabControl>
             </Grid>
         </Border>
 
+        <primitives:Popup x:Name="ProfileSettingsPopup" PlacementTarget="{Binding ElementName=ProfileSettingsButton}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+            <Border Width="470" Background="#202326" BorderBrush="#4A5055" BorderThickness="1" Padding="16" Margin="0,6,0,0"><StackPanel><TextBlock Text="Свойства профиля" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="Название" Foreground="{StaticResource Muted}" FontSize="10" Margin="0,10,0,3"/><TextBox x:Name="ProfileName" Height="32"/><TextBlock Text="Описание" Foreground="{StaticResource Muted}" FontSize="10" Margin="0,7,0,3"/><TextBox x:Name="ProfileDescription" Height="55" AcceptsReturn="True" TextWrapping="Wrap"/><Grid Margin="0,9,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="10"/><ColumnDefinition/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Столбцы" Foreground="{StaticResource Muted}" FontSize="10"/><TextBox x:Name="ColumnsBox" Height="32"/></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="Строки" Foreground="{StaticResource Muted}" FontSize="10"/><TextBox x:Name="RowsBox" Height="32"/></StackPanel></Grid><TextBlock Text="Масштаб" Foreground="{StaticResource Muted}" FontSize="10" Margin="0,8,0,2"/><Slider x:Name="ZoomSlider" Minimum="0.55" Maximum="2.5" Value="1" ValueChanged="ZoomSlider_ValueChanged"/><StackPanel Orientation="Horizontal" Margin="0,7,0,0"><CheckBox x:Name="ShowNumbers" Content="Номера клавиш" IsChecked="True"/><CheckBox x:Name="ShowLabels" Content="Подписи" IsChecked="True" Margin="12,0,0,0"/></StackPanel><Button Content="Сохранить" HorizontalAlignment="Right" Width="110" Margin="0,12,0,0" Click="SaveProfile_Click"/></StackPanel></Border>
+        </primitives:Popup>
 
         <!-- Connection settings: transport selector is intentionally hidden behind the gear. -->
         <primitives:Popup x:Name="SettingsPopup" PlacementTarget="{Binding ElementName=HeaderSettingsButton}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
