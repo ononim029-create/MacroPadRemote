@@ -31,6 +31,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/apply_v124_fixes.py windows
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/apply_v125_fixes.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Publish Windows x64 and native installer
         shell: pwsh
         run: |
@@ -166,7 +168,7 @@ jobs:
         run: |
           ZIP=artifacts/windows/NEXO-win-x64.zip
           SHA=$(sha256sum "$ZIP" | awk '{print $1}')
-          printf '%s\n' "{\"version\":\"1.2.4-preview\",\"channel\":\"preview\",\"packageUrl\":\"https://github.com/${GH_REPO}/releases/download/preview/NEXO-win-x64.zip\",\"sha256\":\"${SHA}\",\"mandatory\":false,\"notes\":\"NEXO v1.2.4: independent panels, bottom workspace layout, long-press docking, reliable unlink, Unicode keyboard input and Super Hotkey macros\"}" > preview.json
+          printf '%s\n' "{\"version\":\"1.2.5-preview\",\"channel\":\"preview\",\"packageUrl\":\"https://github.com/${GH_REPO}/releases/download/preview/NEXO-win-x64.zip\",\"sha256\":\"${SHA}\",\"mandatory\":false,\"notes\":\"NEXO v1.2.5: v1.2.4 workspace and Super Hotkey fixes plus single-instance desktop startup that restores the running window from the tray\"}" > preview.json
       - name: Publish rolling preview
         env:
           GH_TOKEN: ${{ github.token }}
