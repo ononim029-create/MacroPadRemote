@@ -1,0 +1,25 @@
+name: Patch NEXO v1.1
+on:
+  push:
+    branches: [feature/nexo-v11-tablet-installer]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[nexo-v11-patched]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feature/nexo-v11-tablet-installer
+      - name: Apply v1.1 patch
+        run: python3 tools/apply_v11.py
+      - name: Remove one-shot patch files
+        run: rm -f tools/apply_v11.py .github/workflows/patch-v11.yml
+      - name: Commit patched sources
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "NEXO v1.1: tablet mode, unified startup and installer [nexo-v11-patched]"
+          git push origin HEAD:feature/nexo-v11-tablet-installer
