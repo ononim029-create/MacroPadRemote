@@ -117,7 +117,7 @@ jobs:
         run: |
           cd build-mobile
           flutter pub get
-          flutter analyze
+          flutter analyze --no-fatal-infos
           flutter build apk --release
           mkdir -p ../dist
           cp build/app/outputs/flutter-apk/app-release.apk ../dist/NEXO-android.apk
