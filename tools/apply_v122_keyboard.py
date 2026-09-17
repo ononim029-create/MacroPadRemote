@@ -81,7 +81,7 @@ class _TabletRemoteKeyboard extends StatelessWidget {
       _KeyboardKeySpec('P', 'P', ru: 'З'),
       _KeyboardKeySpec('LBRACKET', '[', ru: 'Х', enShift: '{', ruShift: '[{'),
       _KeyboardKeySpec('RBRACKET', ']', ru: 'Ъ', enShift: '}', ruShift: ']}'),
-      _KeyboardKeySpec('BACKSLASH', r'\', ru: r'\', enShift: '|', ruShift: '/', flex: 13),
+      _KeyboardKeySpec('BACKSLASH', r'\', ru: r'\', enShift: '|', ruShift: r'\|', flex: 13),
     ],
     [
       _KeyboardKeySpec('CAPSLOCK', 'Caps', flex: 19),
