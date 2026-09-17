@@ -1,0 +1,41 @@
+name: Fix NEXO v0.10 mobile analyzer
+
+on:
+  push:
+    branches: [feature/nexo-v010-workspace-controls]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message, '[v010-fixed]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feature/nexo-v010-workspace-controls
+      - name: Replace deprecated Matrix4 API and allow exact fit
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/mobile/macropad_mobile/lib/main.dart')
+          s = p.read_text()
+          old = "return Matrix4.identity()..translate(tx, ty)..scale(scale);"
+          new = "return Matrix4.identity()..translateByDouble(tx, ty, 0, 1)..scaleByDouble(scale, scale, scale, 1);"
+          assert old in s, 'Matrix4 fit expression not found'
+          s = s.replace(old, new, 1)
+          s = s.replace("min(1.0, min(sx, sy)).clamp(.20, 1.0).toDouble()", "min(1.0, min(sx, sy)).clamp(.05, 1.0).toDouble()", 1)
+          s = s.replace("minScale: .20,", "minScale: .05,", 1)
+          p.write_text(s)
+          PY
+      - name: Commit source fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/mobile/macropad_mobile/lib/main.dart
+          git commit -m "Fix NEXO v0.10 Android analyzer and exact landscape fit [v010-fixed] [diag-result]"
+          git push
