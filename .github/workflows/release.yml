@@ -26,9 +26,14 @@ jobs:
           $iconBytes = [Convert]::FromBase64String($iconBase64)
           [IO.File]::WriteAllBytes('src/windows/MacroPadRemote/Nexo.ico', $iconBytes)
           [IO.File]::WriteAllBytes('src/windows/NexoInstaller/Nexo.ico', $iconBytes)
+          [IO.File]::WriteAllBytes('src/windows/NexoUninstaller/Nexo.ico', $iconBytes)
 
           dotnet publish src/windows/MacroPadRemote/MacroPadRemote.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:ApplicationIcon=Nexo.ico -o dist/windows
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          dotnet publish src/windows/NexoUninstaller/NexoUninstaller.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:ApplicationIcon=Nexo.ico -o dist/uninstaller
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item dist/uninstaller/NEXO-Uninstall.exe dist/windows/NEXO-Uninstall.exe -Force
 
           dotnet publish src/windows/NexoInstaller/NexoInstaller.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:ApplicationIcon=Nexo.ico -o dist/installer
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -133,7 +138,7 @@ jobs:
         run: |
           ZIP=artifacts/windows/NEXO-win-x64.zip
           SHA=$(sha256sum "$ZIP" | awk '{print $1}')
-          printf '%s\n' "{\"version\":\"1.1.0-preview\",\"channel\":\"preview\",\"packageUrl\":\"https://github.com/${GH_REPO}/releases/download/preview/NEXO-win-x64.zip\",\"sha256\":\"${SHA}\",\"mandatory\":false,\"notes\":\"NEXO v1.1: tablet keyboard, startup animations, Windows tray mode and animated graphical Windows installer\"}" > preview.json
+          printf '%s\n' "{\"version\":\"1.1.0-preview\",\"channel\":\"preview\",\"packageUrl\":\"https://github.com/${GH_REPO}/releases/download/preview/NEXO-win-x64.zip\",\"sha256\":\"${SHA}\",\"mandatory\":false,\"notes\":\"NEXO v1.1: animated GUI installer, Control Panel uninstall registration and graphical uninstaller\"}" > preview.json
       - name: Publish rolling preview
         env:
           GH_TOKEN: ${{ github.token }}
@@ -143,7 +148,7 @@ jobs:
             gh release create preview --repo "$GH_REPO" --prerelease --title "NEXO Preview" --notes "Rolling preview build"
           fi
 
-          # Publish the small installer assets first so setup becomes available immediately.
+          # Installer is small, publish it first.
           gh release upload preview \
             artifacts/windows/NEXO-Setup.exe \
             artifacts/windows/NEXO-Setup.bat \
@@ -152,6 +157,6 @@ jobs:
             --clobber \
             --repo "$GH_REPO"
 
+          # The GUI setup downloads this full package. It contains NEXO.exe and NEXO-Uninstall.exe.
           gh release upload preview artifacts/windows/NEXO-win-x64.zip --clobber --repo "$GH_REPO"
-          gh release upload preview artifacts/windows/NEXO.exe --clobber --repo "$GH_REPO"
           gh release upload preview artifacts/android/NEXO-android.apk --clobber --repo "$GH_REPO"
