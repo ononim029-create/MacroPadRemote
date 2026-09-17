@@ -196,7 +196,7 @@
                         <Rectangle Grid.Row="1" Fill="#F2F2F2" Margin="0,5,5,0"/>
                         <Rectangle Grid.Row="1" Grid.Column="1" Fill="#24272A" Stroke="#F2F2F2" StrokeThickness="2" Margin="5,5,0,0"/>
                     </Grid>
-                    <TextBlock Text="NEXO" HorizontalAlignment="Center" Margin="0,18,0,0" FontSize="25" FontWeight="Bold" CharacterSpacing="220"/>
+                    <TextBlock Text="NEXO" HorizontalAlignment="Center" Margin="0,18,0,0" FontSize="25" FontWeight="Bold"/>
                     <TextBlock x:Name="StartupStatus" Text="Загрузка…" HorizontalAlignment="Center" Margin="0,10,0,0" FontSize="11" Foreground="#9DA3A8"/>
                     <ProgressBar Width="120" Height="2" IsIndeterminate="True" Margin="0,16,0,0" Foreground="#1688FF" Background="#24272A"/>
                 </StackPanel>
