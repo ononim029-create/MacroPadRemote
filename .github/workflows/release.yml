@@ -81,6 +81,7 @@ jobs:
           python3 tools/apply_v121_fixes.py mobile
           python3 tools/fix_v121_layout.py
           python3 tools/apply_v122_keyboard.py
+          python3 tools/apply_v122_profile_mobile.py
       - name: Create Android host
         shell: bash
         run: |
