@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -83,7 +84,8 @@ class MacroPadApp extends StatelessWidget {
     final square = RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: const BorderSide(color: mpBorder));
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'MacroPad Remote',
+      title: 'NEXO',
+      builder: (context, child) => MediaQuery(data: MediaQuery.of(context).copyWith(textScaler: MediaQuery.of(context).textScaler.clamp(minScaleFactor: .85, maxScaleFactor: 1.15)), child: child!),
       theme: ThemeData(
         brightness: Brightness.dark,
         useMaterial3: true,
@@ -129,7 +131,9 @@ class MacroPadApp extends StatelessWidget {
         ),
         cardTheme: const CardThemeData(color: mpPanel2, surfaceTintColor: Colors.transparent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: BorderSide(color: mpBorder))),
         snackBarTheme: const SnackBarThemeData(backgroundColor: mpPanel2, contentTextStyle: TextStyle(color: Colors.white), shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero), behavior: SnackBarBehavior.floating),
-        dialogTheme: const DialogThemeData(backgroundColor: mpPanel, shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: BorderSide(color: mpBorder))),
+        dialogTheme: const DialogThemeData(backgroundColor: mpPanel, titleTextStyle: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w600), contentTextStyle: TextStyle(color: mpText), shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: BorderSide(color: mpBorder))),
+        popupMenuTheme: const PopupMenuThemeData(color: mpPanel2, textStyle: TextStyle(color: Colors.white)),
+        listTileTheme: const ListTileThemeData(textColor: Colors.white, iconColor: Colors.white, selectedColor: Colors.white, selectedTileColor: mpHover),
         progressIndicatorTheme: const ProgressIndicatorThemeData(color: mpBlue),
         tooltipTheme: const TooltipThemeData(decoration: BoxDecoration(color: mpPanel2, border: Border.fromBorderSide(BorderSide(color: mpBorder))), textStyle: TextStyle(color: Colors.white)),
       ),
@@ -148,7 +152,7 @@ class DiscoveredPc {
   DiscoveredPc({required this.name, required this.serverId, required this.host, required this.port, DateTime? seenAt}) : seenAt = seenAt ?? DateTime.now();
 
   factory DiscoveredPc.fromJson(Map<String, dynamic> json, {String? networkHost}) => DiscoveredPc(
-        name: '${json['name'] ?? 'MacroPad PC'}',
+        name: '${json['name'] ?? 'NEXO PC'}',
         serverId: '${json['serverId'] ?? ''}',
         host: networkHost?.isNotEmpty == true ? networkHost! : '${json['host'] ?? ''}',
         port: (json['port'] as num?)?.toInt() ?? 8765,
@@ -221,7 +225,7 @@ class SavedPc {
 
   factory SavedPc.fromJson(Map<String, dynamic> json) => SavedPc(
         serverId: '${json['serverId'] ?? ''}',
-        name: '${json['name'] ?? 'MacroPad PC'}',
+        name: '${json['name'] ?? 'NEXO PC'}',
         host: '${json['host'] ?? ''}',
         port: (json['port'] as num?)?.toInt() ?? 8765,
         deviceToken: '${json['deviceToken'] ?? ''}',
@@ -355,7 +359,7 @@ class _ConnectPageState extends State<ConnectPage> {
       void probe() => socket.send(utf8.encode(discoveryProbe), InternetAddress('255.255.255.255'), discoveryPort);
       probe();
       probeTimer = Timer.periodic(const Duration(seconds: 2), (_) => probe());
-      if (mounted) setState(() => status = 'Поиск MacroPad Remote в этой Wi‑Fi сети…');
+      if (mounted) setState(() => status = 'Поиск NEXO в этой Wi‑Fi сети…');
     } catch (e) {
       if (mounted) setState(() => status = 'Не удалось запустить сетевой поиск: $e');
     }
@@ -378,7 +382,7 @@ class _ConnectPageState extends State<ConnectPage> {
     });
     scanningBle = true;
     await UniversalBle.startScan(scanFilter: ScanFilter(withServices: [serviceUuid]));
-    if (mounted) setState(() => status = 'Поиск MacroPad Remote по Bluetooth LE…');
+    if (mounted) setState(() => status = 'Поиск NEXO по Bluetooth LE…');
   }
 
   Future<void> _stopBleScan() async {
@@ -464,7 +468,7 @@ class _ConnectPageState extends State<ConnectPage> {
     if (qr.transport != TransportKind.bluetooth) return _message('Этот QR-код предназначен для Wi‑Fi.');
     await _stopBleScan();
     final remote = BleRemoteTransport(device: device, clientId: clientId, pairToken: qr.token);
-    await _openRemote(remote, serverId: qr.serverId, serverName: device.name ?? 'MacroPad Remote', host: '', port: 0, transportName: 'ble', bleDeviceId: device.deviceId);
+    await _openRemote(remote, serverId: qr.serverId, serverName: device.name ?? 'NEXO', host: '', port: 0, transportName: 'ble', bleDeviceId: device.deviceId);
     if (mounted && transport == TransportKind.bluetooth) await _startBleScan();
   }
 
@@ -513,6 +517,7 @@ class _ConnectPageState extends State<ConnectPage> {
       );
       await _reloadSaved();
       if (switchTo != null && mounted) {
+        if (switchTo == '__device_list__') return;
         final target = savedPcs[switchTo];
         if (target != null) await _connectSaved(target);
       }
@@ -528,7 +533,7 @@ class _ConnectPageState extends State<ConnectPage> {
     final formFactor = formFactorOf(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Row(mainAxisSize: MainAxisSize.min, children: [MacroPadMark(size: 24), SizedBox(width: 10), Text('MacroPad Remote')]),
+        title: const Row(mainAxisSize: MainAxisSize.min, children: [MacroPadMark(size: 24), SizedBox(width: 10), Text('NEXO')]),
         actions: [
           Center(child: Text(formFactorLabel(formFactor), style: const TextStyle(fontSize: 11, color: mpMuted))),
           const SizedBox(width: 5),
@@ -611,7 +616,7 @@ class _ConnectPageState extends State<ConnectPage> {
   }
 
   Widget _wifiList() {
-    if (pcs.isEmpty) return const _EmptyDiscovery(icon: Icons.wifi_find, text: 'Ожидание компьютера MacroPad Remote в локальной сети…');
+    if (pcs.isEmpty) return const _EmptyDiscovery(icon: Icons.wifi_find, text: 'Ожидание компьютера NEXO в локальной сети…');
     final values = pcs.values.toList()..sort((a, b) => a.name.compareTo(b.name));
     return ListView.separated(
       itemCount: values.length,
@@ -633,14 +638,14 @@ class _ConnectPageState extends State<ConnectPage> {
   }
 
   Widget _bleList() {
-    if (bleDevices.isEmpty) return const _EmptyDiscovery(icon: Icons.bluetooth_searching, text: 'Поиск MacroPad Remote по Bluetooth LE…');
+    if (bleDevices.isEmpty) return const _EmptyDiscovery(icon: Icons.bluetooth_searching, text: 'Поиск NEXO по Bluetooth LE…');
     final values = bleDevices.values.toList();
     return ListView.separated(
       itemCount: values.length,
       separatorBuilder: (_, _) => const SizedBox(height: 7),
       itemBuilder: (_, index) {
         final device = values[index];
-        final name = device.name?.trim().isNotEmpty == true ? device.name!.trim() : 'MacroPad Remote';
+        final name = device.name?.trim().isNotEmpty == true ? device.name!.trim() : 'NEXO';
         final saved = savedPcs.values.where((x) => x.bleDeviceId == device.deviceId).firstOrNull;
         return Card(
           margin: EdgeInsets.zero,
@@ -821,7 +826,7 @@ class RemotePage extends StatefulWidget {
   State<RemotePage> createState() => _RemotePageState();
 }
 
-class _RemotePageState extends State<RemotePage> {
+class _RemotePageState extends State<RemotePage> with SingleTickerProviderStateMixin {
   StreamSubscription<String>? subscription;
   ProfileSnapshot? profile;
   List<WorkspaceProfileSummary> profiles = const [];
@@ -830,12 +835,18 @@ class _RemotePageState extends State<RemotePage> {
   String? connectionError;
   String serverId = '';
   String serverName = '';
+  bool viewLocked = true;
+  final TransformationController _deckTransform = TransformationController();
+  late final AnimationController _deckReturnController;
+  Animation<Matrix4>? _deckReturnAnimation;
 
   @override
   void initState() {
     super.initState();
     serverId = widget.initialServerId;
     serverName = widget.initialServerName;
+    _deckReturnController = AnimationController(vsync: this, duration: const Duration(milliseconds: 260))
+      ..addListener(() { if (_deckReturnAnimation != null) _deckTransform.value = _deckReturnAnimation!.value; });
     _connect();
   }
 
@@ -864,7 +875,7 @@ class _RemotePageState extends State<RemotePage> {
     final raw = error.toString();
     if (raw.contains('401')) return 'ПК отклонил сохранённую привязку. Удалите устройство из списка и выполните подключение через QR заново.';
     if (raw.contains('No route to host') || raw.contains('Network is unreachable')) return 'ПК найден, но сетевой адрес недоступен. Устройства должны быть в одной локальной сети.';
-    if (raw.contains('Connection refused')) return 'ПК доступен, но MacroPad Remote не принимает соединение. Проверьте приложение на ПК и Windows Firewall.';
+    if (raw.contains('Connection refused')) return 'ПК доступен, но NEXO не принимает соединение. Проверьте приложение на ПК и Windows Firewall.';
     return raw;
   }
 
@@ -879,7 +890,7 @@ class _RemotePageState extends State<RemotePage> {
         if (token.isNotEmpty && serverId.isNotEmpty) {
           await widget.onPaired(SavedPc(
             serverId: serverId,
-            name: serverName.isEmpty ? 'MacroPad PC' : serverName,
+            name: serverName.isEmpty ? 'NEXO PC' : serverName,
             host: widget.host,
             port: widget.port,
             deviceToken: token,
@@ -897,7 +908,7 @@ class _RemotePageState extends State<RemotePage> {
         if (pairedToken.isNotEmpty && serverId.isNotEmpty) {
           await widget.onPaired(SavedPc(
             serverId: serverId,
-            name: serverName.isEmpty ? 'MacroPad PC' : serverName,
+            name: serverName.isEmpty ? 'NEXO PC' : serverName,
             host: widget.host,
             port: widget.port,
             deviceToken: pairedToken,
@@ -920,9 +931,28 @@ class _RemotePageState extends State<RemotePage> {
   Future<void> _switchProfile(String profileId) => widget.transport.send({'type': 'switchProfile', 'profileId': profileId});
   Future<void> _switchPage(String pageId) => widget.transport.send({'type': 'switchPage', 'pageId': pageId});
 
+  void _toggleViewLock() {
+    final next = !viewLocked;
+    setState(() => viewLocked = next);
+    if (next) {
+      _deckReturnController.stop();
+      _deckReturnAnimation = Matrix4Tween(begin: _deckTransform.value.clone(), end: Matrix4.identity()).animate(CurvedAnimation(parent: _deckReturnController, curve: Curves.easeOutCubic));
+      _deckReturnController.forward(from: 0);
+    }
+  }
+
+  Future<void> _forgetCurrentDevice() async {
+    if (serverId.isEmpty) return;
+    await DeviceStore.remove(serverId);
+    await widget.transport.close();
+    if (mounted) Navigator.of(context).pop();
+  }
+
   @override
   void dispose() {
     subscription?.cancel();
+    _deckReturnController.dispose();
+    _deckTransform.dispose();
     widget.transport.close();
     super.dispose();
   }
@@ -931,27 +961,32 @@ class _RemotePageState extends State<RemotePage> {
   Widget build(BuildContext context) {
     final pages = <Widget>[deck(), media()];
     if (tab >= pages.length) tab = 0;
-    return Scaffold(
-      drawer: _drawer(),
-      appBar: AppBar(
-        title: Row(mainAxisSize: MainAxisSize.min, children: [const MacroPadMark(size: 22), const SizedBox(width: 9), Flexible(child: Text(profile?.name ?? 'MacroPad Remote', overflow: TextOverflow.ellipsis))]),
-        actions: [
-          IconButton(tooltip: 'Повернуть экран', onPressed: () => toggleScreenOrientation(context), icon: const Icon(Icons.screen_rotation)),
-          Padding(
-            padding: const EdgeInsets.only(right: 10),
-            child: Center(child: Row(children: [Icon(Icons.circle, size: 8, color: connectionError == null && status != 'Отключено' ? mpGreen : mpMuted), const SizedBox(width: 6), Text(status, style: const TextStyle(fontSize: 11))])),
-          ),
-        ],
+    final compact = widget.formFactor == ClientFormFactor.phone && MediaQuery.orientationOf(context) == Orientation.landscape;
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
+        drawer: _drawer(compact: compact),
+        appBar: AppBar(
+          toolbarHeight: compact ? 38 : null,
+          titleSpacing: compact ? 8 : null,
+          title: Row(mainAxisSize: MainAxisSize.min, children: [MacroPadMark(size: compact ? 17 : 22), SizedBox(width: compact ? 6 : 9), Flexible(child: Text(profile?.name ?? 'NEXO', overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: compact ? 13 : null)))]),
+          actions: [
+            IconButton(tooltip: viewLocked ? 'Разблокировать вид' : 'Заблокировать вид', visualDensity: compact ? VisualDensity.compact : VisualDensity.standard, onPressed: _toggleViewLock, icon: Icon(viewLocked ? Icons.lock : Icons.lock_open, size: compact ? 19 : 23)),
+            IconButton(tooltip: 'Повернуть экран', visualDensity: compact ? VisualDensity.compact : VisualDensity.standard, onPressed: () => toggleScreenOrientation(context), icon: Icon(Icons.screen_rotation, size: compact ? 19 : 23)),
+            Padding(padding: EdgeInsets.only(right: compact ? 5 : 10), child: Center(child: Row(children: [Icon(Icons.circle, size: 7, color: connectionError == null && status != 'Отключено' ? mpGreen : mpMuted), const SizedBox(width: 5), if (!compact) Text(status, style: const TextStyle(fontSize: 11))]))),
+          ],
+        ),
+        body: SafeArea(child: connectionError == null ? pages[tab] : _connectionErrorView()),
+        bottomNavigationBar: connectionError == null ? _SharpBottomNav(compact: compact, selectedIndex: tab, onSelected: (value) => setState(() => tab = value), items: const [_SharpNavItem(Icons.grid_view, 'Deck'), _SharpNavItem(Icons.play_circle_outline, 'Media')]) : null,
       ),
-      body: SafeArea(child: connectionError == null ? pages[tab] : _connectionErrorView()),
-      bottomNavigationBar: connectionError == null ? _SharpBottomNav(selectedIndex: tab, onSelected: (value) => setState(() => tab = value), items: const [_SharpNavItem(Icons.grid_view, 'Deck'), _SharpNavItem(Icons.play_circle_outline, 'Media')]) : null,
     );
   }
 
-  Widget _drawer() {
+  Widget _drawer({required bool compact}) {
     final activeId = profile?.id;
     final saved = widget.savedDevices;
     return Drawer(
+      width: compact ? 250 : null,
       child: SafeArea(
         child: Column(
           children: [
@@ -959,7 +994,7 @@ class _RemotePageState extends State<RemotePage> {
               height: 68,
               padding: const EdgeInsets.symmetric(horizontal: 16),
               decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: mpBorder))),
-              child: Row(children: [const MacroPadMark(size: 28), const SizedBox(width: 11), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('MacroPad Remote', style: TextStyle(fontWeight: FontWeight.w600)), Text(serverName.isEmpty ? 'Подключено' : serverName, style: const TextStyle(color: mpMuted, fontSize: 11))]))]),
+              child: Row(children: [const MacroPadMark(size: 28), const SizedBox(width: 11), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('NEXO', style: TextStyle(fontWeight: FontWeight.w600)), Text(serverName.isEmpty ? 'Подключено' : serverName, style: const TextStyle(color: mpMuted, fontSize: 11))]))]),
             ),
             Expanded(
               child: ListView(
@@ -989,7 +1024,7 @@ class _RemotePageState extends State<RemotePage> {
                       ),
                   ],
                   const Divider(height: 1),
-                  const Padding(padding: EdgeInsets.fromLTRB(16, 14, 16, 6), child: Text('УСТРОЙСТВА', style: TextStyle(color: mpMuted, fontSize: 10, letterSpacing: 1))),
+                  const Padding(padding: EdgeInsets.fromLTRB(16, 14, 16, 6), child: Text('СМЕНИТЬ УСТРОЙСТВО', style: TextStyle(color: mpMuted, fontSize: 10, letterSpacing: 1))),
                   for (final pc in saved)
                     ListTile(
                       dense: true,
@@ -1005,6 +1040,21 @@ class _RemotePageState extends State<RemotePage> {
                         });
                       },
                     ),
+                  const Divider(height: 1),
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.devices_other, size: 20),
+                    title: const Text('Сменить устройство'),
+                    subtitle: const Text('Вернуться к списку устройств', style: TextStyle(fontSize: 10, color: mpMuted)),
+                    onTap: () { Navigator.of(context).pop(); Future<void>.delayed(const Duration(milliseconds: 100), () { if (mounted) Navigator.of(context).pop('__device_list__'); }); },
+                  ),
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.link_off, size: 20),
+                    title: const Text('Забыть текущее устройство'),
+                    subtitle: const Text('Для следующего подключения потребуется QR', style: TextStyle(fontSize: 10, color: mpMuted)),
+                    onTap: () async { Navigator.of(context).pop(); await _forgetCurrentDevice(); },
+                  ),
                 ],
               ),
             ),
@@ -1026,7 +1076,7 @@ class _RemotePageState extends State<RemotePage> {
               const SizedBox(height: 10),
               Text(connectionError ?? '', style: const TextStyle(color: mpMuted)),
               const SizedBox(height: 14),
-              Row(children: [Expanded(child: OutlinedButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Назад'))), const SizedBox(width: 8), Expanded(child: FilledButton(onPressed: _connect, child: const Text('Повторить')))]),
+              Row(children: [Expanded(child: OutlinedButton(onPressed: () => Navigator.of(context).pop('__device_list__'), child: const Text('Сменить устройство'))), const SizedBox(width: 8), Expanded(child: FilledButton(onPressed: _connect, child: const Text('Повторить')))]),
             ]),
           ),
         ),
@@ -1046,7 +1096,7 @@ class _RemotePageState extends State<RemotePage> {
   Widget _pageSelector(ProfileSnapshot p) {
     if (p.pages.length <= 1) return const SizedBox(height: 6);
     return Container(
-      height: 48,
+      height: widget.formFactor == ClientFormFactor.phone && MediaQuery.orientationOf(context) == Orientation.landscape ? 34 : 48,
       decoration: const BoxDecoration(color: mpPanel, border: Border(bottom: BorderSide(color: mpBorder))),
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
@@ -1075,51 +1125,45 @@ class _RemotePageState extends State<RemotePage> {
     return LayoutBuilder(
       builder: (_, constraints) {
         final columns = p.columns.clamp(1, 12).toInt();
-        final isPhonePortrait = widget.formFactor == ClientFormFactor.phone && MediaQuery.orientationOf(context) == Orientation.portrait;
+        final rows = p.rows.clamp(1, 12).toInt();
         const gapBase = 7.0;
         const padBase = 10.0;
-        double cellW;
-        double cellH;
-        double uiScale;
-        double gap;
-        double pad;
-
-        if (isPhonePortrait) {
-          const baseCellW = 98.0;
-          const baseCellH = 76.0;
-          final baseGridWidth = padBase * 2 + columns * baseCellW + (columns - 1) * gapBase;
-          final scale = (constraints.maxWidth / baseGridWidth).clamp(0.20, 1.0);
-          cellW = baseCellW * scale;
-          cellH = baseCellH * scale;
-          gap = gapBase * scale;
-          pad = padBase * scale;
-          uiScale = scale.clamp(.38, 1.0);
-        } else {
-          gap = gapBase;
-          pad = 12;
-          final usable = (constraints.maxWidth - pad * 2 - gap * (columns - 1)).clamp(1.0, double.infinity);
-          cellW = usable / columns;
-          cellH = cellW * .78;
-          uiScale = (cellW / 105).clamp(.62, 1.18);
-        }
-
-        final packed = packTiles(p.tiles, p.rows, columns);
-        final totalH = pad * 2 + p.rows * cellH + (p.rows - 1) * gap;
-        return SingleChildScrollView(
-          child: SizedBox(
-            height: totalH,
-            child: Stack(children: [
-              for (final item in packed)
-                Positioned(
-                  left: pad + item.column * (cellW + gap),
-                  top: pad + item.row * (cellH + gap),
-                  width: item.columnSpan * cellW + (item.columnSpan - 1) * gap,
-                  height: item.rowSpan * cellH + (item.rowSpan - 1) * gap,
-                  child: _remoteTile(item.tile, uiScale),
-                ),
-            ]),
-          ),
+        final compact = widget.formFactor == ClientFormFactor.phone && MediaQuery.orientationOf(context) == Orientation.landscape;
+        final availableW = (constraints.maxWidth - padBase * 2 - gapBase * (columns - 1)).clamp(1.0, double.infinity);
+        final availableH = (constraints.maxHeight - padBase * 2 - gapBase * (rows - 1)).clamp(1.0, double.infinity);
+        final fitW = availableW / columns;
+        final fitH = availableH / rows;
+        final cellW = min(fitW, fitH / .76).clamp(compact ? 42.0 : 36.0, 150.0);
+        final cellH = cellW * .76;
+        final uiScale = (cellW / 105).clamp(.38, 1.18);
+        final packed = packTiles(p.tiles, rows, columns);
+        final totalW = padBase * 2 + columns * cellW + (columns - 1) * gapBase;
+        final totalH = padBase * 2 + rows * cellH + (rows - 1) * gapBase;
+        final canvas = SizedBox(
+          width: totalW, height: totalH,
+          child: Stack(children: [
+            for (final item in packed) Positioned(
+              left: padBase + item.column * (cellW + gapBase),
+              top: padBase + item.row * (cellH + gapBase),
+              width: item.columnSpan * cellW + (item.columnSpan - 1) * gapBase,
+              height: item.rowSpan * cellH + (item.rowSpan - 1) * gapBase,
+              child: _remoteTile(item.tile, uiScale),
+            ),
+          ]),
         );
+        return Stack(children: [
+          Center(child: InteractiveViewer(
+            transformationController: _deckTransform,
+            panEnabled: !viewLocked, scaleEnabled: !viewLocked,
+            minScale: .45, maxScale: 3.2, boundaryMargin: const EdgeInsets.all(500), constrained: false,
+            child: canvas,
+          )),
+          Positioned(right: compact ? 5 : 8, top: compact ? 5 : 8, child: Material(
+            color: const Color(0xee202326),
+            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero, side: BorderSide(color: mpBorder)),
+            child: InkWell(onTap: _toggleViewLock, child: Padding(padding: EdgeInsets.all(compact ? 6 : 8), child: Icon(viewLocked ? Icons.lock : Icons.lock_open, size: compact ? 16 : 19, color: Colors.white))),
+          )),
+        ]);
       },
     );
   }
@@ -1138,8 +1182,10 @@ class _RemotePageState extends State<RemotePage> {
           padding: EdgeInsets.all(padding),
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
             _tileIcon(tile, iconSize, blank),
-            SizedBox(height: (5 * scale).clamp(1.0, 6.0)),
-            Flexible(child: Text(tile.title, textAlign: TextAlign.center, maxLines: scale < .52 ? 1 : 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: fontSize, color: blank ? const Color(0xff7c8287) : Colors.white, fontWeight: FontWeight.w600, height: 1.05))),
+            if (tile.showLabel) ...[
+              SizedBox(height: (5 * scale).clamp(1.0, 6.0)),
+              Flexible(child: Text(tile.title, textAlign: TextAlign.center, maxLines: scale < .52 ? 1 : 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: fontSize, color: blank ? const Color(0xff7c8287) : Colors.white, fontWeight: FontWeight.w600, height: 1.05))),
+            ],
           ]),
         ),
       ),
@@ -1211,7 +1257,8 @@ class _SharpBottomNav extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onSelected;
   final List<_SharpNavItem> items;
-  const _SharpBottomNav({required this.selectedIndex, required this.onSelected, required this.items});
+  final bool compact;
+  const _SharpBottomNav({required this.selectedIndex, required this.onSelected, required this.items, this.compact = false});
 
   @override
   Widget build(BuildContext context) => Container(
@@ -1219,7 +1266,7 @@ class _SharpBottomNav extends StatelessWidget {
         child: SafeArea(
           top: false,
           child: SizedBox(
-            height: 66,
+            height: compact ? 44 : 66,
             child: Row(children: [
               for (var i = 0; i < items.length; i++)
                 Expanded(
@@ -1227,7 +1274,7 @@ class _SharpBottomNav extends StatelessWidget {
                     onTap: () => onSelected(i),
                     child: Container(
                       decoration: BoxDecoration(color: i == selectedIndex ? mpHover : mpPanel, border: Border(top: BorderSide(color: i == selectedIndex ? mpBlue : Colors.transparent, width: 2), right: i < items.length - 1 ? const BorderSide(color: mpBorder) : BorderSide.none)),
-                      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(items[i].icon, color: Colors.white, size: 23), const SizedBox(height: 4), Text(items[i].label, style: const TextStyle(color: Colors.white, fontSize: 11))]),
+                      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(items[i].icon, color: Colors.white, size: compact ? 18 : 23), SizedBox(height: compact ? 1 : 4), Text(items[i].label, style: TextStyle(color: Colors.white, fontSize: compact ? 9 : 11))]),
                     ),
                   ),
                 ),
@@ -1291,15 +1338,17 @@ class TileSnapshot {
   final String actionType;
   final String iconKind;
   final String iconValue;
+  final bool showLabel;
   final int rowSpan;
   final int columnSpan;
-  const TileSnapshot({required this.id, required this.title, required this.actionType, required this.iconKind, required this.iconValue, required this.rowSpan, required this.columnSpan});
+  const TileSnapshot({required this.id, required this.title, required this.actionType, required this.iconKind, required this.iconValue, required this.showLabel, required this.rowSpan, required this.columnSpan});
   factory TileSnapshot.fromJson(Map<String, dynamic> json) => TileSnapshot(
         id: '${json['id'] ?? ''}',
         title: '${json['title'] ?? 'Кнопка'}',
         actionType: '${json['actionType'] ?? ''}',
         iconKind: '${json['iconKind'] ?? 'auto'}',
         iconValue: '${json['iconValue'] ?? ''}',
+        showLabel: json['showLabel'] != false,
         rowSpan: ((json['rowSpan'] as num?)?.toInt() ?? 1).clamp(1, 12).toInt(),
         columnSpan: ((json['columnSpan'] as num?)?.toInt() ?? 1).clamp(1, 12).toInt(),
       );

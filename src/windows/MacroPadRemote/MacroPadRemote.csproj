@@ -7,9 +7,9 @@
     <UseWPF>true</UseWPF>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyName>MacroPadRemote</AssemblyName>
-    <Product>MacroPad Remote</Product>
-    <Version>0.8.0</Version>
-    <InformationalVersion>0.8.0-preview</InformationalVersion>
+    <Product>NEXO</Product>
+    <Version>0.9.0</Version>
+    <InformationalVersion>0.9.0-preview</InformationalVersion>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
