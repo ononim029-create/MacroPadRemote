@@ -24,6 +24,8 @@ def main() -> None:
     path = ROOT / "src/mobile/macropad_mobile/lib/main.dart"
     text = path.read_text(encoding="utf-8")
 
+    text = text.replace("  Size _deckModelSize = Size.zero;\n", "")
+
     text = replace_once(
         text,
         """  Offset _deckGestureCenterAnchor = Offset.zero;
@@ -75,7 +77,6 @@ def main() -> None:
     final fitScale = _defaultDeckScale(_deckViewportSize, _deckCanvasSize);
     _deckMinScale = fitScale;
     _deckMaxScale = max(_deckMaxScale, fitScale * 2);
-    _deckModelSize = Size(_deckCanvasSize.width * 2, _deckCanvasSize.height * 2);
     _deckModelCenter = _defaultModelCenter(_deckViewportSize, _deckCanvasSize, fitScale);
 
     final begin = _deckTransform.value.clone();
@@ -179,7 +180,6 @@ def main() -> None:
 
     _deckViewportSize = viewport;
     _deckCanvasSize = canvas;
-    _deckModelSize = Size(canvas.width * 2, canvas.height * 2);
 
     final zeroScale = _defaultDeckScale(viewport, canvas);
     final current = _deckTransform.value;
@@ -367,7 +367,6 @@ def main() -> None:
 
         _deckViewportSize = viewport;
         _deckCanvasSize = canvasSize;
-        _deckModelSize = Size(totalW * 2, totalH * 2);
         _deckMinScale = zeroScale;
         _deckMaxScale = max(zeroScale, maxScale);
 
