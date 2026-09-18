@@ -314,10 +314,10 @@ def main() -> None:
     final currentScale = current.getMaxScaleOnAxis().clamp(_deckMinScale, _deckMaxScale).toDouble();
 
     Matrix4 candidate;
-    final scaleChanged = !_scaleLockedForGesture()
-        && (currentScale - _deckGestureScaleAnchor).abs() > .0005;
+    final scaleGesture = !scaleLocked
+        && (details.pointerCount > 1 || (currentScale - _deckGestureScaleAnchor).abs() > .0005);
 
-    if (scaleChanged) {
+    if (scaleGesture) {
       // Zoom is allowed to change ONLY scale. Its focus stays strictly at the
       // geometric center of the complete tile block, never at the finger point.
       candidate = _matrixWithScaleAndCenter(currentScale, _deckGestureCenterAnchor);
@@ -331,8 +331,6 @@ def main() -> None:
     _deckClampGuard = false;
   }
 
-  bool _scaleLockedForGesture() => scaleLocked;
-
   Widget _deckCanvas(ProfileSnapshot p) {
     return LayoutBuilder(
       builder: (_, constraints) {
@@ -343,10 +341,14 @@ def main() -> None:
         final compact = widget.formFactor == ClientFormFactor.phone
             && MediaQuery.orientationOf(context) == Orientation.landscape;
 
+        // Reconstruct the full deck area before auxiliary panels reduced it.
+        // Tile base size must remain stable when a panel merely opens/closes.
+        final baseViewportW = constraints.maxWidth + _workspaceLeftInset + _workspaceRightInset;
+        final baseViewportH = constraints.maxHeight + _workspaceTopInset + _workspaceBottomInset;
         final availableW =
-            (constraints.maxWidth - padBase * 2 - gapBase * (columns - 1)).clamp(1.0, double.infinity);
+            (baseViewportW - padBase * 2 - gapBase * (columns - 1)).clamp(1.0, double.infinity);
         final availableH =
-            (constraints.maxHeight - padBase * 2 - gapBase * (rows - 1)).clamp(1.0, double.infinity);
+            (baseViewportH - padBase * 2 - gapBase * (rows - 1)).clamp(1.0, double.infinity);
         final fitW = availableW / columns;
         final fitH = availableH / rows;
         final cellW = min(fitW, fitH / .76).clamp(18.0, 150.0);
