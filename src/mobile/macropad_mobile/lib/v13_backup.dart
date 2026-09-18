@@ -99,16 +99,21 @@ class V13WorkspaceVault {
   }
 }
 
+DateTime _v13VaultUnlockedUntil = DateTime.fromMillisecondsSinceEpoch(0);
+
 Future<bool> v13UnlockWorkspaceVault() async {
+  if (DateTime.now().isBefore(_v13VaultUnlockedUntil)) return true;
   final auth = LocalAuthentication();
   try {
     if (!await auth.isDeviceSupported()) return false;
-    return await auth.authenticate(
+    final ok = await auth.authenticate(
       localizedReason: 'Подтвердите личность, чтобы открыть сохранённые рабочие пространства NEXO',
       persistAcrossBackgrounding: true,
       biometricOnly: false,
       sensitiveTransaction: true,
     );
+    if (ok) _v13VaultUnlockedUntil = DateTime.now().add(const Duration(minutes: 2));
+    return ok;
   } on LocalAuthException {
     return false;
   } catch (_) {
