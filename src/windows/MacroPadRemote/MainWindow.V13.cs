@@ -218,6 +218,16 @@ public partial class MainWindow
     private Task V13SendWorkspaceBackupAsync(WebSocket socket)
         => SendJsonAsync(socket, V13WorkspaceBackupMessage());
 
+    private async Task V13BroadcastWorkspaceBackupOnlyAsync()
+    {
+        List<WebSocket> sockets;
+        lock (_clients)
+            sockets = _clients.Where(x => x.State == WebSocketState.Open).ToList();
+
+        foreach (var socket in sockets)
+            try { await V13SendWorkspaceBackupAsync(socket); } catch { }
+    }
+
     private async Task V13SendWorkspaceBackupToClientAsync(string clientId)
     {
         List<WebSocket> sockets;
