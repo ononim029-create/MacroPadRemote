@@ -27,9 +27,10 @@ def main() -> None:
     # Dynamic pan/zoom metrics for the current deck viewport.
     text = replace_once(
         text,
-        "  Matrix4? _deckUserTransformBeforeFit;\n",
-        """  Matrix4? _deckUserTransformBeforeFit;
-  Matrix4? _pendingDeckRestore;
+        """  bool _deckFitMode = false;
+  Matrix4? _deckUserTransformBeforeFit;
+""",
+        """  Matrix4? _pendingDeckRestore;
   Size _deckViewportSize = Size.zero;
   Size _deckCanvasSize = Size.zero;
   Size _deckCellSize = Size.zero;
@@ -79,8 +80,6 @@ def main() -> None:
       keepFullyVisible: true,
     );
 
-    _deckFitMode = true;
-    _deckUserTransformBeforeFit = null;
     _deckReturnAnimation = Matrix4Tween(begin: begin, end: target)
         .animate(CurvedAnimation(parent: _deckReturnController, curve: Curves.easeOutCubic));
     _deckReturnController.forward(from: 0);
@@ -265,7 +264,9 @@ def main() -> None:
   }
 
   void _clampDeckTransform({bool keepFullyVisible = false}) {
-    if (_deckClampGuard || _deckViewportSize.isEmpty || _deckCanvasSize.isEmpty) return;
+    if (_deckClampGuard || _deckViewportSize.isEmpty || _deckCanvasSize.isEmpty) {
+      return;
+    }
     final current = _deckTransform.value;
     final bounded = _boundedDeckMatrix(current, keepFullyVisible: keepFullyVisible);
 
@@ -274,7 +275,9 @@ def main() -> None:
     final changed = (currentScale - nextScale).abs() > .0005
         || (current.storage[12] - bounded.storage[12]).abs() > .2
         || (current.storage[13] - bounded.storage[13]).abs() > .2;
-    if (!changed) return;
+    if (!changed) {
+      return;
+    }
 
     _deckClampGuard = true;
     _deckTransform.value = bounded;
@@ -283,7 +286,9 @@ def main() -> None:
 
   void _applyPendingDeckRestore() {
     final pending = _pendingDeckRestore;
-    if (pending == null || _deckViewportSize.isEmpty || _deckCanvasSize.isEmpty) return;
+    if (pending == null || _deckViewportSize.isEmpty || _deckCanvasSize.isEmpty) {
+      return;
+    }
     _pendingDeckRestore = null;
     _deckReturnController.stop();
     _deckTransform.value = _boundedDeckMatrix(pending);
@@ -362,8 +367,6 @@ def main() -> None:
               clipBehavior: Clip.hardEdge,
               onInteractionStart: (_) {
                 _deckReturnController.stop();
-                _deckFitMode = false;
-                _deckUserTransformBeforeFit = null;
               },
               onInteractionUpdate: (_) => _clampDeckTransform(),
               onInteractionEnd: (_) {
