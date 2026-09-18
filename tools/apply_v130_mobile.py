@@ -182,6 +182,8 @@ def patch_mobile() -> None:
         'formFactor': widget.formFactor == ClientFormFactor.tablet ? 'tablet' : 'phone',
         'deviceName': '${formFactorLabel(widget.formFactor)} ${widget.clientId.length > 4 ? widget.clientId.substring(widget.clientId.length - 4) : widget.clientId}',
       });
+      _remoteRevoked = false;
+      _resumeReconnectPending = false;
       if (mounted) setState(() => status = widget.transport.label);''',
         '''      await widget.transport.send({
         'type': 'clientInfo',
@@ -189,6 +191,8 @@ def patch_mobile() -> None:
         'formFactor': widget.formFactor == ClientFormFactor.tablet ? 'tablet' : 'phone',
         'deviceName': '${formFactorLabel(widget.formFactor)} ${widget.clientId.length > 4 ? widget.clientId.substring(widget.clientId.length - 4) : widget.clientId}',
       });
+      _remoteRevoked = false;
+      _resumeReconnectPending = false;
       await widget.transport.send({'type': 'workspaceBackupRequest'});
       if (mounted) setState(() => status = widget.transport.label);''',
         "v1.3 request full workspace on connect",
