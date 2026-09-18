@@ -53,19 +53,21 @@
             <Setter Property="BorderBrush" Value="#D2D2D2"/>
         </Style>
         <Style TargetType="TextBox">
-            <Setter Property="Background" Value="#111315"/>
-            <Setter Property="Foreground" Value="{StaticResource Text}"/>
+            <Setter Property="Background" Value="#2C3034"/>
+            <Setter Property="Foreground" Value="White"/>
             <Setter Property="CaretBrush" Value="White"/>
-            <Setter Property="BorderBrush" Value="{StaticResource Border}"/>
+            <Setter Property="SelectionBrush" Value="#1688FF"/>
+            <Setter Property="BorderBrush" Value="#4B5156"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding" Value="8,5"/>
         </Style>
         <Style TargetType="ComboBox">
-            <Setter Property="Background" Value="#111315"/>
-            <Setter Property="Foreground" Value="{StaticResource Text}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource Border}"/>
+            <Setter Property="Background" Value="#2C3034"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="#4B5156"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding" Value="6,3"/>
+            <Setter Property="TextElement.Foreground" Value="White"/>
         </Style>
         <!-- Native combo popups are light on Windows; force dark text there. -->
         <Style TargetType="ComboBoxItem">

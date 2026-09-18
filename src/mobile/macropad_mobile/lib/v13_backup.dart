@@ -20,6 +20,7 @@ class V13WorkspaceVault {
   static const _indexKey = 'nexo_workspace_vault_index_v1';
   static const _prefix = 'nexo_workspace_vault_v1_';
   static const _pendingKey = 'nexo_transfer_pending_v14';
+  static const _linksKey = 'nexo_link_relations_v141';
 
   static String _key(String serverId) => '$_prefix$serverId';
 
@@ -57,7 +58,7 @@ class V13WorkspaceVault {
       result.add(
         V13WorkspaceSummary(
           serverId: id,
-          serverName: (payload['serverName'] ?? 'NEXO PC').toString(),
+          serverName: (payload['sourceServerName'] ?? payload['serverName'] ?? 'NEXO PC').toString(),
           updatedUtc: DateTime.tryParse((payload['updatedUtc'] ?? payload['savedAtUtc'] ?? '').toString())?.toUtc() ?? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
           profileCount: profiles.length,
         ),
@@ -108,6 +109,57 @@ class V13WorkspaceVault {
 
   static Future<void> clearPending() async {
     await _storage.delete(key: _pendingKey);
+  }
+
+
+  static Future<void> saveLinkRelation({
+    required String aServerId,
+    required String aServerName,
+    required String bServerId,
+    required String bServerName,
+    required bool enabled,
+  }) async {
+    if (aServerId.isEmpty || bServerId.isEmpty || aServerId == bServerId) return;
+    final map = await _loadLinks();
+
+    void updateOne(String ownerId, String peerId, String peerName) {
+      final peers = Map<String, dynamic>.from(map[ownerId] is Map ? map[ownerId] as Map : const {});
+      if (enabled) {
+        peers[peerId] = {
+          'serverId': peerId,
+          'serverName': peerName.isEmpty ? 'NEXO PC' : peerName,
+        };
+      } else {
+        peers.remove(peerId);
+      }
+      map[ownerId] = peers;
+    }
+
+    updateOne(aServerId, bServerId, bServerName);
+    updateOne(bServerId, aServerId, aServerName);
+    await _storage.write(key: _linksKey, value: jsonEncode(map));
+  }
+
+  static Future<List<Map<String, dynamic>>> linkedPeersJson(String serverId) async {
+    final map = await _loadLinks();
+    final peers = map[serverId];
+    if (peers is! Map) return <Map<String, dynamic>>[];
+
+    return peers.values
+        .whereType<Map>()
+        .map((x) => Map<String, dynamic>.from(x))
+        .where((x) => (x['serverId'] ?? '').toString().isNotEmpty)
+        .toList();
+  }
+
+  static Future<Map<String, dynamic>> _loadLinks() async {
+    try {
+      final raw = await _storage.read(key: _linksKey);
+      if (raw == null || raw.isEmpty) return <String, dynamic>{};
+      return Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    } catch (_) {
+      return <String, dynamic>{};
+    }
   }
 
   static Future<List<String>> _loadIndex() async {

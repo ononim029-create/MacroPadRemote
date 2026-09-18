@@ -302,7 +302,7 @@ public partial class MainWindow
         };
         form.Children.Add(hint);
 
-        var apps = V14RunningApplications();
+        var apps = V141RunningApplications();
         ComboBox AppCombo(string label)
         {
             var row = new Grid { Margin = new Thickness(0, 0, 0, 8) };
@@ -314,13 +314,7 @@ public partial class MainWindow
                 VerticalAlignment = VerticalAlignment.Center,
                 Foreground = (Brush)FindResource("Muted")
             });
-            var combo = new ComboBox
-            {
-                IsEditable = true,
-                IsTextSearchEnabled = true,
-                ItemsSource = apps,
-                Height = 32
-            };
+            var combo = V141ApplicationCombo(apps);
             Grid.SetColumn(combo, 1);
             row.Children.Add(combo);
             form.Children.Add(row);
@@ -459,9 +453,9 @@ public partial class MainWindow
         var create = new MenuItem { Header = "Создать новый профиль" };
         create.Click += (_, _) =>
         {
-            var name = Prompt("Новый профиль", "Новый профиль");
-            if (string.IsNullOrWhiteSpace(name)) return;
-            var p = EmptyProfile(name.Trim(), name.Trim()[..1].ToUpperInvariant());
+            var name = V141PromptNewProfileName(owner);
+            if (name is null) return;
+            var p = EmptyProfile(name, name[..1].ToUpperInvariant());
             _profiles.Add(p);
             _state.ActiveProfileId = p.Id;
             SaveState();
