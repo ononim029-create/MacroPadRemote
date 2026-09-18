@@ -198,14 +198,15 @@ def main() -> None:
     final fit = min(viewport.width / canvas.width, viewport.height / canvas.height)
         .clamp(0.02, double.infinity)
         .toDouble();
-    _deckMinScale = fit;
-    _deckMaxScale = max(fit, fit * _maximumDeckZoomFactor(rows, columns));
 
     final current = _deckTransform.value;
-    var scale = current.getMaxScaleOnAxis().clamp(_deckMinScale, _deckMaxScale).toDouble();
+    final rawScale = current.getMaxScaleOnAxis();
+    var scale = rawScale;
     var center = Offset(current.storage[12], current.storage[13]);
 
     if (!_deckGeometryInitialized) {
+      _deckMinScale = fit;
+      _deckMaxScale = max(fit, fit * _maximumDeckZoomFactor(rows, columns));
       _deckGeometryInitialized = true;
       _deckPreviousWorkOrigin = workOrigin;
       _deckPreviousViewport = viewport;
@@ -226,6 +227,11 @@ def main() -> None:
         || (_deckPreviousViewport.height - viewport.height).abs() > .1;
     final canvasChanged = (_deckPreviousCanvas.width - canvas.width).abs() > .1
         || (_deckPreviousCanvas.height - canvas.height).abs() > .1;
+
+    // Panel geometry itself never forces a zoom jump.
+    _deckMinScale = workChanged ? min(fit, rawScale) : fit;
+    _deckMaxScale = max(_deckMinScale, fit * _maximumDeckZoomFactor(rows, columns));
+    scale = scale.clamp(_deckMinScale, _deckMaxScale).toDouble();
 
     if (workChanged) {
       // Preserve the block's absolute screen position first. Opening a panel
@@ -371,8 +377,10 @@ def main() -> None:
         _deckViewportSize = viewport;
         _deckCanvasSize = canvasSize;
         _deckModelSize = _calculateDeckModelSpace(canvasSize, viewport);
-        _deckMinScale = fitScale;
-        _deckMaxScale = maxScale;
+        final currentScale = _deckTransform.value.getMaxScaleOnAxis();
+        final geometryAlreadyKnown = _deckGeometryInitialized;
+        _deckMinScale = geometryAlreadyKnown ? min(fitScale, currentScale) : fitScale;
+        _deckMaxScale = max(maxScale, _deckMinScale);
 
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) {
