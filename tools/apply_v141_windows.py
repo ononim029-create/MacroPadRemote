@@ -9,20 +9,25 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
         raise RuntimeError(f"{label}: expected exactly one match, got {count}")
     return text.replace(old, new, 1)
 
+def replace_between(text: str, start: str, end: str, replacement: str, label: str) -> str:
+    a = text.find(start)
+    if a < 0:
+        raise RuntimeError(f"{label}: start marker not found")
+    b = text.find(end, a + len(start))
+    if b < 0:
+        raise RuntimeError(f"{label}: end marker not found")
+    return text[:a] + replacement + text[b:]
+
+
 
 def main() -> None:
     cs_path = ROOT / "src/windows/MacroPadRemote/MainWindow.xaml.cs"
     text = cs_path.read_text(encoding="utf-8")
 
-    text = replace_once(
+    text = replace_between(
         text,
-        '''    private void AddProfile_Click(object sender, RoutedEventArgs e)
-    {
-        var name = Prompt("Новый профиль", $"Профиль {_profiles.Count + 1}");
-        if (name is null) return;
-        var profile = DefaultProfile(name, name[..1].ToUpperInvariant());
-        _profiles.Add(profile); _state.ActiveProfileId = profile.Id; SaveState(); RefreshProfiles();
-    }''',
+        "    private void AddProfile_Click(object sender, RoutedEventArgs e)\n    {",
+        "\n    private void DeleteProfile_Click(object sender, RoutedEventArgs e)",
         '''    private void AddProfile_Click(object sender, RoutedEventArgs e)
     {
         var name = V141PromptNewProfileName(this);
@@ -34,7 +39,9 @@ def main() -> None:
         RefreshProfiles();
         ProfileBox.SelectedItem = profile;
         _ = BroadcastSnapshotAsync();
-    }''',
+    }
+
+''',
         "require profile name",
     )
 
