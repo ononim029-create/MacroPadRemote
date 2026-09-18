@@ -158,6 +158,15 @@ def main() -> None:
 '''
     text = replace_between(text, workspace_start, control_start, workspace, "exact work-area boundaries")
 
+    text = text.replace(
+        "_handleTranslation(profileDock, profileRailVisible, 50)",
+        "_handleTranslation(profileDock, profileRailVisible, 48)",
+    )
+    text = text.replace(
+        "_handleTranslation(navDock, bottomNavVisible, 54)",
+        "_handleTranslation(navDock, bottomNavVisible, 52)",
+    )
+
     # Side/top panels are flush with the edge; the old 4px padding made the
     # invisible work-area boundary disagree with the visible panel boundary.
     text = replace_between(
