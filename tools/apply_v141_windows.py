@@ -100,6 +100,16 @@ def main() -> None:
         1,
     )
     xaml = xaml.replace(
+        '<DataTrigger Binding="{Binding RelativeSource={RelativeSource FindAncestor, AncestorType={x:Type ListBoxItem}},Path=IsMouseOver}" Value="True"><Setter TargetName="ProfileDots" Property="Visibility" Value="Visible"/></DataTrigger>',
+        '',
+        1,
+    )
+    xaml = xaml.replace(
+        '<DataTrigger Binding="{Binding RelativeSource={RelativeSource FindAncestor, AncestorType={x:Type ListBoxItem}},Path=IsSelected}" Value="True"><Setter TargetName="ProfileDots" Property="Visibility" Value="Visible"/></DataTrigger>',
+        '',
+        1,
+    )
+    xaml = xaml.replace(
         '<Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="40"/></Grid.ColumnDefinitions>\n                        <Button Content="＋  Добавить профиль" HorizontalContentAlignment="Left" Click="AddProfile_Click"/>\n                        <Button Grid.Column="1" Content="−" Margin="6,0,0,0" Click="DeleteProfile_Click"/>',
         '<Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="0"/></Grid.ColumnDefinitions>\n                        <Button Content="＋  Добавить профиль" HorizontalContentAlignment="Left" Click="AddProfile_Click"/>\n                        <Button Grid.Column="1" Content="−" Margin="6,0,0,0" Click="DeleteProfile_Click" Visibility="Collapsed"/>',
         1,
