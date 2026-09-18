@@ -453,6 +453,17 @@ def main() -> None:
         "interaction resets view toggle",
     )
 
+    text = replace_once(
+        text,
+        """        final baseViewportW = constraints.maxWidth + _workspaceLeftInset + _workspaceRightInset;
+        final baseViewportH = constraints.maxHeight + _workspaceTopInset + _workspaceBottomInset;
+""",
+        """        final baseViewportW = constraints.maxWidth;
+        final baseViewportH = constraints.maxHeight;
+""",
+        "stable tile geometry with overlay panels",
+    )
+
     # Render stays full-size; only geometry calculations use the reduced
     # invisible work rectangle.
     old_viewport = r'''        final viewport = Size(constraints.maxWidth, constraints.maxHeight);
