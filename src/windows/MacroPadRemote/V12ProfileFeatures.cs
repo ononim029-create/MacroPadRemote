@@ -45,8 +45,14 @@ public partial class MainWindow
             var exe = ForegroundAppService.GetExecutableName();
             var automatic = string.IsNullOrWhiteSpace(exe)
                 ? null
-                : _profiles.FirstOrDefault(p => !string.IsNullOrWhiteSpace(p.BoundApplication)
-                    && string.Equals(p.BoundApplication, exe, StringComparison.OrdinalIgnoreCase));
+                : _profiles.FirstOrDefault(p =>
+                {
+                    V14NormalizeProfileBindings(p);
+                    return p.BoundApplications.Any(app => string.Equals(app, exe, StringComparison.OrdinalIgnoreCase));
+                });
+
+            if (automatic is null && !string.IsNullOrWhiteSpace(_state.DefaultProfileId))
+                automatic = _profiles.FirstOrDefault(p => string.Equals(p.Id, _state.DefaultProfileId, StringComparison.Ordinal));
 
             var profileChanged = automatic is not null && !string.Equals(_state.ActiveProfileId, automatic.Id, StringComparison.Ordinal);
             if (profileChanged)
@@ -75,21 +81,23 @@ public partial class MainWindow
         var icon = new MenuItem { Header = "Иконка профиля…" };
         icon.Click += (_, _) => ShowProfileIconPicker(profile);
 
+        V14NormalizeProfileBindings(profile);
         var bind = new MenuItem
         {
-            Header = string.IsNullOrWhiteSpace(profile.BoundApplication)
-                ? "Привязать приложение…"
-                : $"Приложение: {profile.BoundApplication}"
+            Header = profile.BoundApplications.Count == 0
+                ? "Приложения профиля…"
+                : $"Приложения: {string.Join(", ", profile.BoundApplications)}"
         };
-        bind.Click += (_, _) => BindProfileApplication(profile);
+        bind.Click += (_, _) => V14OpenSettingsWindow();
 
         var unbind = new MenuItem
         {
-            Header = "Убрать привязку приложения",
-            IsEnabled = !string.IsNullOrWhiteSpace(profile.BoundApplication)
+            Header = "Убрать привязки приложений",
+            IsEnabled = profile.BoundApplications.Count > 0
         };
         unbind.Click += (_, _) =>
         {
+            profile.BoundApplications.Clear();
             profile.BoundApplication = "";
             profile.BoundApplicationPath = "";
             SaveState();
