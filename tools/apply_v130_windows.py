@@ -42,8 +42,10 @@ def patch_windows() -> None:
     text = replace_once(
         text,
         '''            await StartSelectedTransportAsync();
+            StartV12ContextMonitor();
             StartupStatus.Text = "Готово";''',
         '''            await StartSelectedTransportAsync();
+            StartV12ContextMonitor();
             await V13RunFirstLaunchWizardAsync();
             StartupStatus.Text = "Готово";''',
         "v1.3 first-run wizard",
