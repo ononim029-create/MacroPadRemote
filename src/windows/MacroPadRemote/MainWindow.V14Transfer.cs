@@ -279,7 +279,8 @@ public partial class MainWindow
         bool includeAllSettings,
         bool createLink,
         bool markPending,
-        bool linkUpdate)
+        bool linkUpdate,
+        bool manualLinkUpdate = false)
     {
         return new
         {
@@ -296,6 +297,7 @@ public partial class MainWindow
             createLink,
             markPending,
             linkUpdate,
+            manualLinkUpdate,
             activeProfileId = _state.ActiveProfileId,
             defaultProfileId = _state.DefaultProfileId,
             profiles = profiles.ToList(),
@@ -308,7 +310,8 @@ public partial class MainWindow
         bool includeAllSettings,
         bool createLink,
         bool markPending,
-        bool linkUpdate = false)
+        bool linkUpdate = false,
+        bool manualLinkUpdate = false)
     {
         List<WebSocket> sockets;
         lock (_clients)
@@ -320,7 +323,7 @@ public partial class MainWindow
             return;
         }
 
-        var package = V14TransferPackage(profiles, includeAllSettings, createLink, markPending, linkUpdate);
+        var package = V14TransferPackage(profiles, includeAllSettings, createLink, markPending, linkUpdate, manualLinkUpdate);
         foreach (var socket in sockets)
         {
             try { await SendJsonAsync(socket, package); } catch { }
@@ -570,12 +573,19 @@ public partial class MainWindow
 
             var manualLinkRefresh = root.TryGetProperty("manualLinkRefresh", out var manualEl)
                 && manualEl.ValueKind == JsonValueKind.True;
-            if (_state.DeviceLinkEnabled && (_state.DeviceLinkAutoUpdate || manualLinkRefresh)
-                && root.TryGetProperty("workspace", out var autoWorkspace)
-                && autoWorkspace.ValueKind == JsonValueKind.Object)
+            var workspaceForSync = root.TryGetProperty("workspace", out var autoWorkspace)
+                && autoWorkspace.ValueKind == JsonValueKind.Object
+                ? autoWorkspace
+                : default;
+            var packageIsPendingManualUpdate = workspaceForSync.ValueKind == JsonValueKind.Object
+                && workspaceForSync.TryGetProperty("manualLinkUpdate", out var pendingManualEl)
+                && pendingManualEl.ValueKind == JsonValueKind.True;
+            if (_state.DeviceLinkEnabled
+                && (_state.DeviceLinkAutoUpdate || manualLinkRefresh || packageIsPendingManualUpdate)
+                && workspaceForSync.ValueKind == JsonValueKind.Object)
             {
                 await Dispatcher.InvokeAsync(() =>
-                    V14ApplyTransferPackage(autoWorkspace, replaceExisting: true, automatic: true, createBidirectionalLink: true));
+                    V14ApplyTransferPackage(workspaceForSync, replaceExisting: true, automatic: true, createBidirectionalLink: true));
                 return true;
             }
 
@@ -773,7 +783,7 @@ public partial class MainWindow
             await V141PushOwnWorkspaceAsync(markPending: false);
     }
 
-    private async Task V141PushOwnWorkspaceAsync(bool markPending)
+    private async Task V141PushOwnWorkspaceAsync(bool markPending, bool manualLinkUpdate = false)
     {
         List<WebSocket> sockets;
         lock (_clients)
@@ -785,7 +795,8 @@ public partial class MainWindow
             includeAllSettings: true,
             createLink: false,
             markPending: markPending,
-            linkUpdate: true);
+            linkUpdate: true,
+            manualLinkUpdate: manualLinkUpdate);
 
         foreach (var socket in sockets)
         {
@@ -820,7 +831,7 @@ public partial class MainWindow
         }
 
         if (_state.DeviceLinkAutoUpdate || requestWorkspaces)
-            await V141PushOwnWorkspaceAsync(markPending: false);
+            await V141PushOwnWorkspaceAsync(markPending: false, manualLinkUpdate: requestWorkspaces);
     }
 
     private async Task V141ApplyLinkPeersResponseAsync(JsonElement root)
@@ -908,15 +919,19 @@ public partial class MainWindow
                 requestWorkspaces = _state.DeviceLinkAutoUpdate
             });
 
-            if (!_state.DeviceLinkEnabled || !_state.DeviceLinkAutoUpdate)
+            if (!_state.DeviceLinkEnabled)
                 return;
 
-            await SendJsonAsync(socket, V14TransferPackage(
-                _profiles.ToList(),
-                includeAllSettings: true,
-                createLink: false,
-                markPending: false,
-                linkUpdate: true));
+            if (_state.DeviceLinkAutoUpdate)
+            {
+                await SendJsonAsync(socket, V14TransferPackage(
+                    _profiles.ToList(),
+                    includeAllSettings: true,
+                    createLink: false,
+                    markPending: false,
+                    linkUpdate: true,
+                    manualLinkUpdate: false));
+            }
 
             foreach (var peer in V141ActiveLinkedDevices())
             {
@@ -924,7 +939,8 @@ public partial class MainWindow
                 {
                     type = "transferPackageRequest",
                     sourceServerId = peer.ServerId,
-                    automatic = true
+                    automatic = _state.DeviceLinkAutoUpdate,
+                    manualLinkRefresh = false
                 });
             }
         }
