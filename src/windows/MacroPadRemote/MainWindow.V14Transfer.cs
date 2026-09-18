@@ -555,7 +555,8 @@ public partial class MainWindow
 
         if (messageType == "linkPeersResponse")
         {
-            await Dispatcher.InvokeAsync(async () => await V141ApplyLinkPeersResponseAsync(root));
+            var pending = await Dispatcher.InvokeAsync(() => V141ApplyLinkPeersResponseAsync(root));
+            await pending;
             return true;
         }
 
@@ -618,7 +619,15 @@ public partial class MainWindow
 
             V141LinkedDevice? peer = null;
             if (!string.IsNullOrWhiteSpace(sourceId) && !string.Equals(sourceId, _state.ServerId, StringComparison.Ordinal))
-                peer = V141UpsertLinkedDevice(sourceId, sourceName);
+            {
+                peer = (_state.LinkedDevices ?? new List<V141LinkedDevice>())
+                    .FirstOrDefault(x => string.Equals(x.ServerId, sourceId, StringComparison.Ordinal));
+
+                if (peer is null && (createBidirectionalLink || packageWantsLink))
+                    peer = V141UpsertLinkedDevice(sourceId, sourceName);
+                else if (peer is not null && !string.IsNullOrWhiteSpace(sourceName))
+                    peer.Name = sourceName;
+            }
 
             if (automatic)
             {
@@ -800,7 +809,7 @@ public partial class MainWindow
             catch { }
         }
 
-        if (_state.DeviceLinkAutoUpdate)
+        if (_state.DeviceLinkAutoUpdate || requestWorkspaces)
             await V141PushOwnWorkspaceAsync(markPending: false);
     }
 
@@ -836,7 +845,10 @@ public partial class MainWindow
         try { SaveState(); }
         finally { _v14ApplyingTransfer = oldApplying; }
 
-        if (_state.DeviceLinkAutoUpdate)
+        var manualWorkspaceRefresh = root.TryGetProperty("requestWorkspaces", out var requestEl)
+            && requestEl.ValueKind == JsonValueKind.True;
+
+        if (_state.DeviceLinkAutoUpdate || manualWorkspaceRefresh)
         {
             List<WebSocket> sockets;
             lock (_clients)
