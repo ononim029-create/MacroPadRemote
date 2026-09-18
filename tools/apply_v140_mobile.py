@@ -26,38 +26,161 @@ def main() -> None:
     path = ROOT / "src/mobile/macropad_mobile/lib/main.dart"
     text = path.read_text(encoding="utf-8")
 
-    # Phone/tablet no longer stores complete profiles or hotkey definitions.
-    text = text.replace("\nimport 'v13_backup.dart';\n", "\n")
-
-    transfer_button = r'''                const SizedBox(height: 14),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.move_to_inbox_outlined),
-                  label: const Text('Перенос / библиотека устройств'),
-                  onPressed: () async {
-                    Navigator.of(dialogContext).pop();
-                    await _v13ScanRestoreQr();
-                  },
-                ),'''
-    text = text.replace(transfer_button, "")
+    # v1.4 uses explicit transfer packages. Mobile does not mirror every active
+    # workspace anymore; it only stores a package when a PC explicitly sends it
+    # or when link auto-sync is enabled.
+    text = text.replace("Перенос / библиотека устройств", "QR: передача / импорт")
+    text = text.replace("      await widget.transport.send({'type': 'workspaceBackupRequest'});\n", "")
 
     if "  Future<void> _v13ScanRestoreQr() async {" in text:
         text = replace_between(
             text,
             "  Future<void> _v13ScanRestoreQr() async {",
             "  Future<void> _pairWifi(DiscoveredPc pc) async {",
-            "",
-            "remove phone workspace restore",
+            r'''  Future<void> _v13ScanRestoreQr() async {
+    final qr = await _scanQr();
+    if (!mounted || qr == null) return;
+    if (qr.mode != 'importDevice') {
+      _message('Этот QR предназначен для обычного подключения.');
+      return;
+    }
+    await _v14SendPendingTransferByQr(qr);
+  }
+
+  Future<void> _v14SendPendingTransferByQr(QrPairing qr) async {
+    if (qr.transport != TransportKind.wifi || qr.host == null || qr.host!.trim().isEmpty) {
+      _message('Передача профилей через QR выполняется по Wi‑Fi.');
+      return;
+    }
+
+    final workspace = await V13WorkspaceVault.loadPending();
+    if (workspace == null) {
+      _message('На устройстве нет подготовленного пакета. Сначала передайте профили с исходного ПК.');
+      return;
+    }
+
+    final remote = WifiRemoteTransport(
+      host: qr.host!.trim(),
+      port: qr.port,
+      clientId: clientId,
+      pairToken: qr.token,
+    );
+    StreamSubscription<String>? transferSub;
+    try {
+      await remote.connect();
+      String newToken = '';
+      String newName = 'NEXO PC';
+      final paired = Completer<void>();
+      transferSub = remote.messages.listen((message) async {
+        try {
+          final json = jsonDecode(message);
+          if (json is Map && json['type'] == 'paired') {
+            newToken = (json['deviceToken'] ?? '').toString();
+            newName = (json['serverName'] ?? newName).toString();
+            if (!paired.isCompleted) paired.complete();
+          }
+        } catch (_) {}
+      });
+
+      await remote.send({
+        'type': 'applyTransferPackage',
+        'workspace': workspace,
+        'firstRun': true,
+      });
+      await Future.any([paired.future, Future<void>.delayed(const Duration(milliseconds: 900))]);
+
+      if (newToken.isNotEmpty && qr.serverId.isNotEmpty) {
+        final pc = SavedPc(
+          serverId: qr.serverId,
+          name: newName,
+          host: qr.host!.trim(),
+          port: qr.port,
+          deviceToken: newToken,
+          transport: 'wifi',
+          lastSeen: DateTime.now(),
+        );
+        await DeviceStore.upsert(pc);
+        savedPcs[pc.serverId] = pc;
+      }
+
+      await V13WorkspaceVault.clearPending();
+      if (mounted) _message('Пакет профилей и настроек передан на новый ПК.');
+    } catch (e) {
+      if (mounted) _message('Не удалось передать пакет: $e');
+    } finally {
+      await transferSub?.cancel();
+      await remote.close();
+    }
+  }
+
+''',
+            "v1.4 QR transfer",
         )
 
-    text = text.replace("      await widget.transport.send({'type': 'workspaceBackupRequest'});\n", "")
+    # The normal QR button understands the transfer mode automatically.
+    if "  Future<void> _connectByQrDirect() async {" in text:
+        text = replace_between(
+            text,
+            "  Future<void> _connectByQrDirect() async {",
+            "  Future<void> _pairWifi(DiscoveredPc pc) async {",
+            r'''  Future<void> _connectByQrDirect() async {
+    final qr = await _scanQr();
+    if (!mounted || qr == null) return;
+    if (qr.mode == 'importDevice') {
+      await _v14SendPendingTransferByQr(qr);
+      return;
+    }
+    if (qr.transport == TransportKind.wifi) {
+      final host = qr.host?.trim() ?? '';
+      if (host.isEmpty) return _message('В QR-коде нет адреса ПК.');
+      final remote = WifiRemoteTransport(host: host, port: qr.port, clientId: clientId, pairToken: qr.token);
+      await _openRemote(remote, serverId: qr.serverId, serverName: 'NEXO PC', host: host, port: qr.port, transportName: 'wifi');
+      return;
+    }
+    if (transport != TransportKind.bluetooth) await _switchTransport(TransportKind.bluetooth);
+    _message('Для Bluetooth дождитесь появления ПК в списке и подтвердите привязку этим QR-кодом.');
+  }
+
+''',
+            "QR mode auto routing",
+        )
 
     if "      if (json['type'] == 'workspaceBackup') {" in text:
         text = replace_between(
             text,
             "      if (json['type'] == 'workspaceBackup') {",
             "      if (json['type'] == 'deviceForgotten') {",
-            "",
-            "remove phone workspace vault protocol",
+            r'''      if (json['type'] == 'workspaceBackup') {
+        // Legacy v1.3 message: no passive saving in v1.4.
+        return;
+      }
+      if (json['type'] == 'transferPackage') {
+        final markPending = json['markPending'] != false;
+        await V13WorkspaceVault.saveTransfer(json, markPending: markPending);
+        try {
+          await widget.transport.send({
+            'type': 'transferStored',
+            'sourceServerId': (json['sourceServerId'] ?? '').toString(),
+          });
+        } catch (_) {}
+        return;
+      }
+      if (json['type'] == 'transferPackageRequest') {
+        final requestedServerId = (json['sourceServerId'] ?? '').toString();
+        final workspace = requestedServerId.isEmpty
+            ? await V13WorkspaceVault.loadPending()
+            : await V13WorkspaceVault.load(requestedServerId);
+        try {
+          await widget.transport.send({
+            'type': 'transferPackageResponse',
+            'sourceServerId': requestedServerId,
+            'workspace': workspace,
+          });
+        } catch (_) {}
+        return;
+      }
+''',
+            "v1.4 transfer protocol",
         )
 
     text = replace_once(
