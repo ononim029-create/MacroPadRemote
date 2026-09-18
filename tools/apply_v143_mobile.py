@@ -91,8 +91,12 @@ def main() -> None:
 
     _deckReturnAnimation = Matrix4Tween(begin: begin, end: target)
         .animate(CurvedAnimation(parent: _deckReturnController, curve: Curves.easeOutCubic));
-    _deckReturnController.forward(from: 0);
-    unawaited(_saveDeckView());
+    final resetFuture = _deckReturnController.forward(from: 0);
+    resetFuture.whenComplete(() {
+      if (mounted) {
+        unawaited(_saveDeckView());
+      }
+    });
   }
 
 ''',
@@ -308,16 +312,15 @@ def main() -> None:
     }
 
     final current = _deckTransform.value;
-    final currentScale = current.getMaxScaleOnAxis().clamp(_deckMinScale, _deckMaxScale).toDouble();
-
     Matrix4 candidate;
-    final scaleGesture = !scaleLocked
-        && (details.pointerCount > 1 || (currentScale - _deckGestureScaleAnchor).abs() > .0005);
 
-    if (scaleGesture) {
-      // Zoom is allowed to change ONLY scale. Its focus stays strictly at the
-      // geometric center of the complete tile block, never at the finger point.
-      candidate = _matrixWithScaleAndCenter(currentScale, _deckGestureCenterAnchor);
+    if (!scaleLocked && details.pointerCount > 1) {
+      // Ignore InteractiveViewer's finger-centered translation completely.
+      // Rebuild the transform from the gesture scale around the block center.
+      final desiredScale = (_deckGestureScaleAnchor * details.scale)
+          .clamp(_deckMinScale, _deckMaxScale)
+          .toDouble();
+      candidate = _matrixWithScaleAndCenter(desiredScale, _deckGestureCenterAnchor);
     } else {
       candidate = current;
     }
