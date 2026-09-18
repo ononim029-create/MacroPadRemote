@@ -211,7 +211,9 @@ def main() -> None:
   }
 
   Matrix4 _boundedDeckMatrix(Matrix4 candidate, {bool keepFullyVisible = false}) {
-    if (_deckViewportSize.isEmpty || _deckCanvasSize.isEmpty) return candidate;
+    if (_deckViewportSize.isEmpty || _deckCanvasSize.isEmpty) {
+      return candidate;
+    }
 
     final scale = candidate.getMaxScaleOnAxis().clamp(_deckMinScale, _deckMaxScale).toDouble();
     var tx = candidate.storage[12];
@@ -321,7 +323,9 @@ def main() -> None:
         _deckMaxScale = _maximumDeckScale(rows, columns);
 
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
+          if (!mounted) {
+            return;
+          }
           if (_pendingDeckRestore != null) {
             _applyPendingDeckRestore();
           } else {
