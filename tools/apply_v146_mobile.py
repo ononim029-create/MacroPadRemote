@@ -147,7 +147,7 @@ def main() -> None:
     text = replace_between(
         text,
         "  Size _realModelSpaceSize(Size deck, Size viewport) {",
-        "\n  double _maximumDeckZoomFactor(int rows, int columns) {",
+        "\n  void _fitDeck() {",
         r'''  Size _realModelSpaceSize(Size deck, Size viewport) {
     if (deck.isEmpty || viewport.isEmpty) {
       return deck;
