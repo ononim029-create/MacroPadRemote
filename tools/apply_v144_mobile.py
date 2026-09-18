@@ -120,7 +120,6 @@ def main() -> None:
     // REAL hidden model space: exactly 2x tile-block width and 2x tile-block
     // height. Because the block itself is centered in that model space at zero,
     // it may move by at most half of its own transformed dimensions.
-    _deckModelSize = Size(_deckCanvasSize.width * 2, _deckCanvasSize.height * 2);
     final allowance = Offset(
       _deckCanvasSize.width * scale / 2,
       _deckCanvasSize.height * scale / 2,
