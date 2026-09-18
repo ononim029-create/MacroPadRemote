@@ -122,7 +122,7 @@ def main() -> None:
         text = replace_between(
             text,
             "  Future<void> _connectByQrDirect() async {",
-            "  Future<void> _pairWifi(DiscoveredPc pc) async {",
+            "  Future<void> _v13ScanRestoreQr() async {",
             r'''  Future<void> _connectByQrDirect() async {
     final qr = await _scanQr();
     if (!mounted || qr == null) return;
@@ -189,6 +189,30 @@ def main() -> None:
         "  final Set<String> _keyboardModifiers = <String>{};\n  final Set<String> _physicalKeyboardModifiers = <String>{};\n",
         "physical keyboard modifiers",
     )
+
+    # Remove the legacy Flutter Focus keyboard path. Native Android dispatchKeyEvent
+    # is the single source of external keyboard events in v1.4.
+    text = text.replace(
+        "  final FocusNode _hardwareFocusNode = FocusNode(debugLabel: 'NEXO hardware keyboard', skipTraversal: true);\n",
+        "",
+    )
+    text = text.replace(
+        """    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _hardwareFocusNode.requestFocus();
+    });
+""",
+        "",
+    )
+    if "  String? _physicalKeyToken(PhysicalKeyboardKey key) => switch (key) {" in text:
+        text = replace_between(
+            text,
+            "  String? _physicalKeyToken(PhysicalKeyboardKey key) => switch (key) {",
+            "  Future<void> _selectKeyboardLayout() async {",
+            "",
+            "remove legacy Flutter physical keyboard handler",
+        )
+    text = text.replace("    _hardwareFocusNode.requestFocus();\n", "")
+    text = text.replace("    _hardwareFocusNode.dispose();\n", "")
 
     # Native Android dispatchKeyEvent is authoritative. Flutter Focus no longer
     # receives the same key a second time.
@@ -328,7 +352,11 @@ def main() -> None:
 
     text = text.replace(
         "minScale: .35, maxScale: 3.2, boundaryMargin: const EdgeInsets.all(500), constrained: false,",
-        "minScale: .35, maxScale: 3.2, boundaryMargin: EdgeInsets.zero, constrained: false, clipBehavior: Clip.hardEdge,",
+        "minScale: .35, maxScale: 3.2, boundaryMargin: EdgeInsets.zero, constrained: false,",
+    )
+    text = text.replace(
+        "            clipBehavior: Clip.none,\n            onInteractionStart:",
+        "            clipBehavior: Clip.hardEdge,\n            onInteractionStart:",
     )
 
     # The work-area bounds are invisible. They shrink on every side occupied by
