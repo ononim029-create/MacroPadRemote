@@ -42,7 +42,6 @@ def main() -> None:
   Size _deckViewportSize = Size.zero;
   Size _deckCanvasSize = Size.zero;
   Size _deckModelSize = Size.zero;
-  double _deckFitScale = 1.0;
   double _deckMinScale = 1.0;
   double _deckMaxScale = 2.0;
   bool _deckClampGuard = false;
@@ -83,7 +82,6 @@ def main() -> None:
       _deckViewportSize.height / _deckCanvasSize.height,
     ).clamp(0.02, _deckMaxScale).toDouble();
 
-    _deckFitScale = fitScale;
     _deckMinScale = fitScale;
     _deckModelCenter = Offset.zero;
 
@@ -196,7 +194,6 @@ def main() -> None:
     final fit = min(viewport.width / canvas.width, viewport.height / canvas.height)
         .clamp(0.02, double.infinity)
         .toDouble();
-    _deckFitScale = fit;
     _deckMinScale = fit;
     _deckMaxScale = max(fit, fit * _maximumDeckZoomFactor(rows, columns));
 
@@ -371,7 +368,6 @@ def main() -> None:
         _deckViewportSize = viewport;
         _deckCanvasSize = canvasSize;
         _deckModelSize = _calculateDeckModelSpace(canvasSize, viewport);
-        _deckFitScale = fitScale;
         _deckMinScale = fitScale;
         _deckMaxScale = maxScale;
 
