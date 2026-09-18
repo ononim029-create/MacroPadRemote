@@ -289,7 +289,9 @@ public partial class MainWindow
             sourceServerId = _state.ServerId,
             sourceServerName = Environment.MachineName,
             serverName = Environment.MachineName,
-            updatedUtc = _state.WorkspaceUpdatedUtc,
+            updatedUtc = _state.ProfileWorkspaceUpdatedUtc == DateTime.MinValue
+                ? _state.WorkspaceUpdatedUtc
+                : _state.ProfileWorkspaceUpdatedUtc,
             includeAllSettings,
             createLink,
             markPending,
@@ -622,7 +624,10 @@ public partial class MainWindow
             {
                 if (peer is null || !peer.Enabled) return;
                 if (remoteUpdatedUtc <= peer.LastRemoteUpdateUtc) return;
-                if (remoteUpdatedUtc <= _state.WorkspaceUpdatedUtc) return;
+                var localProfileRevision = _state.ProfileWorkspaceUpdatedUtc == DateTime.MinValue
+                    ? _state.WorkspaceUpdatedUtc
+                    : _state.ProfileWorkspaceUpdatedUtc;
+                if (remoteUpdatedUtc <= localProfileRevision) return;
             }
 
             if (replaceExisting)
