@@ -316,6 +316,22 @@ public partial class MainWindow
 
         var requestedActive = workspace.TryGetProperty("activeProfileId", out var active) ? active.GetString() ?? "" : "";
         _state.ActiveProfileId = _profiles.Any(x => x.Id == requestedActive) ? requestedActive : _profiles[0].Id;
+
+        var sourceServerId = workspace.TryGetProperty("serverId", out var sourceId) ? sourceId.GetString() ?? "" : "";
+        var sourceServerName = workspace.TryGetProperty("serverName", out var sourceName) ? sourceName.GetString() ?? "NEXO PC" : "NEXO PC";
+        var sourceUpdatedUtc = workspace.TryGetProperty("updatedUtc", out var sourceUpdated)
+            && DateTime.TryParse(sourceUpdated.GetString(), out var parsedSourceUpdated)
+                ? parsedSourceUpdated.ToUniversalTime()
+                : DateTime.UtcNow;
+
+        if (!string.IsNullOrWhiteSpace(sourceServerId)
+            && (completeSetup || string.Equals(sourceServerId, _state.SourceServerId, StringComparison.Ordinal)))
+        {
+            _state.SourceServerId = sourceServerId;
+            _state.SourceServerName = sourceServerName;
+            _state.SourceWorkspaceUpdatedUtc = sourceUpdatedUtc;
+        }
+
         if (completeSetup) _state.SetupCompleted = true;
         SaveState();
         RefreshProfiles();
@@ -348,6 +364,60 @@ public partial class MainWindow
     {
         var completed = await Task.WhenAny(task, Task.Delay(timeoutMs));
         return ReferenceEquals(completed, task) ? await task : null;
+    }
+
+    public async Task V13UpdateFromSourceAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_state.SourceServerId))
+        {
+            MessageBox.Show(this, "У этого ПК пока нет исходного устройства.\nОткройте «Библиотека устройств / синхронизация», чтобы копировать профили и функции вручную.", "NEXO");
+            return;
+        }
+
+        List<WebSocket> sockets;
+        lock (_clients) sockets = _clients.Where(x => x.State == WebSocketState.Open).ToList();
+        if (sockets.Count == 0)
+        {
+            MessageBox.Show(this, "Подключите телефон или планшет к NEXO по Wi‑Fi.\nНа мобильном устройстве потребуется подтвердить биометрию/PIN.", "NEXO");
+            return;
+        }
+
+        _v13WorkspaceAwaiter = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await V13SendControlAsync(new { type = "backupWorkspaceRequest", serverId = _state.SourceServerId });
+        var response = await V13WaitAsync(_v13WorkspaceAwaiter.Task);
+        _v13WorkspaceAwaiter = null;
+
+        if (response is null || !response.Value.TryGetProperty("workspace", out var workspace))
+        {
+            MessageBox.Show(this, $"Не удалось получить сохранённую копию «{_state.SourceServerName}».\nУбедитесь, что этот компьютер хотя бы один раз подключался к телефону после последних изменений.", "NEXO");
+            return;
+        }
+
+        var remoteUpdatedUtc = workspace.TryGetProperty("updatedUtc", out var updated)
+            && DateTime.TryParse(updated.GetString(), out var parsedUpdated)
+                ? parsedUpdated.ToUniversalTime()
+                : DateTime.MinValue;
+
+        if (remoteUpdatedUtc != DateTime.MinValue && remoteUpdatedUtc <= _state.SourceWorkspaceUpdatedUtc)
+        {
+            MessageBox.Show(this, $"На «{_state.SourceServerName}» нет более новых изменений.\nПоследняя синхронизация: {_state.SourceWorkspaceUpdatedUtc.ToLocalTime():dd.MM.yyyy HH:mm}.", "NEXO");
+            return;
+        }
+
+        var answer = MessageBox.Show(
+            this,
+            $"Найдена более новая копия рабочего пространства «{_state.SourceServerName}».\n\n" +
+            $"Источник обновлён: {(remoteUpdatedUtc == DateTime.MinValue ? "неизвестно" : remoteUpdatedUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))}\n\n" +
+            "Обновить весь workspace этого ПК?\nТекущие профили будут заменены копией исходного устройства. Для выборочного переноса используйте «Библиотека устройств / синхронизация».",
+            "NEXO — обновление с исходного устройства",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+
+        if (answer != MessageBoxResult.Yes) return;
+
+        V13ImportWorkspace(workspace, completeSetup: false);
+        await BroadcastSnapshotAsync();
+        MessageBox.Show(this, $"Рабочее пространство обновлено с «{_state.SourceServerName}».", "NEXO");
     }
 
     public async Task V13OpenRemoteLibraryAsync()
