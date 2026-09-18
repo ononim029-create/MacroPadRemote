@@ -1,5 +1,5 @@
 #define MyAppName "NEXO"
-#define MyAppVersion "1.4.1-preview"
+#define MyAppVersion "1.4.2-preview"
 #define MyAppPublisher "NEXO"
 #define MyAppExeName "NEXO.exe"
 
@@ -28,9 +28,9 @@ CloseApplications=yes
 RestartApplications=no
 UsePreviousAppDir=yes
 SetupLogging=yes
-VersionInfoVersion=1.4.1.0
+VersionInfoVersion=1.4.2.0
 VersionInfoProductName=NEXO Setup
-VersionInfoProductVersion=1.4.1.0
+VersionInfoProductVersion=1.4.2.0
 VersionInfoCompany=NEXO
 VersionInfoDescription=NEXO Setup
 
