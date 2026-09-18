@@ -568,7 +568,9 @@ public partial class MainWindow
                 return true;
             }
 
-            if (_state.DeviceLinkEnabled && _state.DeviceLinkAutoUpdate
+            var manualLinkRefresh = root.TryGetProperty("manualLinkRefresh", out var manualEl)
+                && manualEl.ValueKind == JsonValueKind.True;
+            if (_state.DeviceLinkEnabled && (_state.DeviceLinkAutoUpdate || manualLinkRefresh)
                 && root.TryGetProperty("workspace", out var autoWorkspace)
                 && autoWorkspace.ValueKind == JsonValueKind.Object)
             {
@@ -714,6 +716,14 @@ public partial class MainWindow
                 _state.SetupCompleted = true;
 
             SaveState();
+            if (automatic && remoteUpdatedUtc != DateTime.MinValue)
+            {
+                // Keep the source profile revision after a synchronized replace.
+                // The content hash is already current, so the second save persists
+                // the remote revision without creating a new local revision.
+                _state.ProfileWorkspaceUpdatedUtc = remoteUpdatedUtc;
+                SaveState();
+            }
             RefreshProfiles();
             _ = BroadcastSnapshotAsync();
 
@@ -864,7 +874,8 @@ public partial class MainWindow
                         {
                             type = "transferPackageRequest",
                             sourceServerId = peer.ServerId,
-                            automatic = true
+                            automatic = _state.DeviceLinkAutoUpdate,
+                            manualLinkRefresh = manualWorkspaceRefresh
                         });
                     }
                     catch { }
