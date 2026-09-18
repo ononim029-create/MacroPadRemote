@@ -226,6 +226,17 @@ public partial class MainWindow
 
         foreach (var socket in sockets)
             try { await V13SendWorkspaceBackupAsync(socket); } catch { }
+
+        if (_ble.IsRunning && _bleAuthenticated && !string.IsNullOrWhiteSpace(_bleClientId))
+        {
+            try
+            {
+                await _ble.SetSnapshotAsync(JsonSerializer.Serialize(V13WorkspaceBackupMessage(), _json));
+                await Task.Delay(180);
+                await _ble.SetSnapshotAsync(JsonSerializer.Serialize(Snapshot(), _json));
+            }
+            catch { }
+        }
     }
 
     private async Task V13SendWorkspaceBackupToClientAsync(string clientId)
