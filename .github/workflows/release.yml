@@ -47,6 +47,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/apply_v145_windows.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/apply_v146_windows.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Publish Windows x64 and native installer
         shell: pwsh
         run: |
@@ -112,6 +114,7 @@ jobs:
           python3 tools/apply_v143_mobile.py
           python3 tools/apply_v144_mobile.py
           python3 tools/apply_v145_mobile.py
+          python3 tools/apply_v146_mobile.py
       - name: Create Android host
         shell: bash
         run: |
@@ -191,7 +194,7 @@ jobs:
         run: |
           ZIP=artifacts/windows/NEXO-win-x64.zip
           SHA=$(sha256sum "$ZIP" | awk '{print $1}')
-          printf '%s\n' "{\"version\":\"1.4.5-preview\",\"channel\":\"preview\",\"packageUrl\":\"https://github.com/${GH_REPO}/releases/download/preview/NEXO-win-x64.zip\",\"sha256\":\"${SHA}\",\"mandatory\":false,\"notes\":\"NEXO v1.4.5: exact 2x-area hidden model space, Stream Deck-like zero view, centered pinch and working pan\"}" > preview.json
+          printf '%s\n' "{\"version\":\"1.4.6-preview\",\"channel\":\"preview\",\"packageUrl\":\"https://github.com/${GH_REPO}/releases/download/preview/NEXO-win-x64.zip\",\"sha256\":\"${SHA}\",\"mandatory\":false,\"notes\":\"NEXO v1.4.6: stable overlay panels, 3.5x-area model space and two-position view restore\"}" > preview.json
       - name: Publish rolling preview
         env:
           GH_TOKEN: ${{ github.token }}
