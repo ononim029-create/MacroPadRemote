@@ -13,6 +13,91 @@ namespace MacroPadRemote;
 
 public partial class MainWindow
 {
+    private string V14ProfilesDirectory => Path.Combine(AppContext.BaseDirectory, "Profiles");
+
+    private List<Profile> V14LoadProfilesFromProgramFolder(List<Profile>? legacyProfiles)
+    {
+        var legacy = legacyProfiles ?? new List<Profile>();
+
+        try
+        {
+            Directory.CreateDirectory(V14ProfilesDirectory);
+            var loaded = new List<Profile>();
+
+            foreach (var file in Directory.EnumerateFiles(V14ProfilesDirectory, "*.nexo-profile", SearchOption.TopDirectoryOnly)
+                         .OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var profile = JsonSerializer.Deserialize<Profile>(File.ReadAllText(file), _json);
+                    if (profile is null) continue;
+                    V14NormalizeProfileBindings(profile);
+                    loaded.Add(profile);
+                }
+                catch
+                {
+                    // A damaged profile file must not prevent NEXO from starting.
+                }
+            }
+
+            if (loaded.Count > 0)
+                return loaded;
+        }
+        catch
+        {
+            // If the program folder is temporarily unavailable, fall back to
+            // the legacy in-memory profiles rather than losing the workspace.
+        }
+
+        return legacy;
+    }
+
+    private void V14PersistProfilesToProgramFolder()
+    {
+        Directory.CreateDirectory(V14ProfilesDirectory);
+
+        var expected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var profile in _profiles)
+        {
+            var safeName = V14SafeFileName(profile.Name);
+            if (safeName.Length > 72) safeName = safeName[..72];
+            var fileName = $"{safeName}__{profile.Id}.nexo-profile";
+            var path = Path.Combine(V14ProfilesDirectory, fileName);
+            var temp = path + ".tmp";
+
+            File.WriteAllText(temp, JsonSerializer.Serialize(profile, _json));
+            File.Move(temp, path, true);
+            expected.Add(Path.GetFullPath(path));
+        }
+
+        foreach (var file in Directory.EnumerateFiles(V14ProfilesDirectory, "*.nexo-profile", SearchOption.TopDirectoryOnly))
+        {
+            var full = Path.GetFullPath(file);
+            if (expected.Contains(full)) continue;
+            try { File.Delete(file); } catch { }
+        }
+    }
+
+    private string V14SerializeStateWithoutProfiles()
+    {
+        var json = JsonSerializer.Serialize(_state, _json);
+        using var document = JsonDocument.Parse(json);
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
+        {
+            writer.WriteStartObject();
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (string.Equals(property.Name, "profiles", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                property.WriteTo(writer);
+            }
+            writer.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
     public void V14OpenSettingsWindow()
     {
         foreach (var profile in _profiles)
