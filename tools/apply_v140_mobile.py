@@ -266,7 +266,7 @@ def main() -> None:
     build_start = """  @override
   Widget build(BuildContext context) {
     final pages = <Widget>[deck(), media()];"""
-    build_end = "\n  Widget _connectionErrorView()"
+    build_end = "\n  ProfileDockSide _nearestDock(Offset point, Size size) {"
     build = r'''  @override
   Widget build(BuildContext context) {
     final pages = <Widget>[deck(), media()];
