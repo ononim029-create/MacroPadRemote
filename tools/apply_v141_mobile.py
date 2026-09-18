@@ -68,6 +68,7 @@ def main() -> None:
           await widget.transport.send({
             'type': 'linkPeersResponse',
             'serverId': serverId,
+            'requestWorkspaces': json['requestWorkspaces'] == true,
             'peers': await V13WorkspaceVault.linkedPeersJson(serverId),
           });
         } catch (_) {}
