@@ -44,8 +44,24 @@ def main() -> None:
     public string SourceServerId { get; set; } = "";''',
         '''    public DateTime DeviceLinkUpdatedUtc { get; set; } = DateTime.MinValue;
     public List<V141LinkedDevice> LinkedDevices { get; set; } = new();
+    public DateTime ProfileWorkspaceUpdatedUtc { get; set; } = DateTime.MinValue;
+    public string ProfileWorkspaceHash { get; set; } = "";
     public string SourceServerId { get; set; } = "";''',
-        "linked devices state",
+        "linked devices and profile revision state",
+    )
+
+    text = replace_once(
+        text,
+        '''        _state.WorkspaceUpdatedUtc = DateTime.UtcNow;
+        try
+        {
+            V14PersistProfilesToProgramFolder();''',
+        '''        _state.WorkspaceUpdatedUtc = DateTime.UtcNow;
+        V141UpdateProfileRevision();
+        try
+        {
+            V14PersistProfilesToProgramFolder();''',
+        "update profile revision on save",
     )
 
     cs_path.write_text(text, encoding="utf-8")
