@@ -46,7 +46,7 @@ public partial class MainWindow
         {
             Owner = this,
             Title = "NEXO — первый запуск",
-            Width = 720,
+            Width = 760,
             Height = 520,
             ResizeMode = ResizeMode.NoResize,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -69,8 +69,9 @@ public partial class MainWindow
         });
         title.Children.Add(new TextBlock
         {
-            Text = "Как настроить этот компьютер?",
+            Text = "Создайте новое рабочее пространство или перенесите подготовленные профили и настройки через телефон/планшет.",
             Foreground = (Brush)FindResource("Muted"),
+            TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 7, 0, 18)
         });
         root.Children.Add(title);
@@ -88,8 +89,8 @@ public partial class MainWindow
             return new Button { Content = panel, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
         }
 
-        var fresh = Choice("Настроить как новое устройство", "Создать самостоятельное рабочее пространство на этом ПК. Текущая логика NEXO остаётся без изменений.");
-        var restore = Choice("Перенести профили с другого ПК", "Отсканировать QR телефоном или планшетом и выбрать сохранённое рабочее пространство другого компьютера.");
+        var fresh = Choice("Настроить как новое устройство", "Создать самостоятельное рабочее пространство на этом ПК.");
+        var restore = Choice("Импортировать с устройства", "На исходном ПК заранее нажмите «Передать настройки и все профили». Затем отсканируйте QR телефоном — NEXO Mobile сам определит, что нужно передать.");
 
         choices.Children.Add(fresh);
         Grid.SetColumn(restore, 2);
@@ -99,7 +100,7 @@ public partial class MainWindow
 
         var note = new TextBlock
         {
-            Text = "Копии рабочих пространств хранятся только во внутреннем защищённом хранилище мобильного устройства.",
+            Text = "PIN-код и биометрия не используются. QR определяет режим передачи автоматически.",
             Foreground = (Brush)FindResource("Muted"),
             FontSize = 11,
             TextWrapping = TextWrapping.Wrap
@@ -129,11 +130,12 @@ public partial class MainWindow
                 }
 
                 RotatePairToken();
-                var payload = $"macropad://connect?transport=wifi&mode=restore&serverId={Uri.EscapeDataString(_state.ServerId)}&host={Uri.EscapeDataString(LocalIp())}&port={WebSocketPort}&token={Uri.EscapeDataString(_pairToken)}";
+                var payload = $"macropad://connect?transport=wifi&mode=importDevice&firstRun=1&serverId={Uri.EscapeDataString(_state.ServerId)}&host={Uri.EscapeDataString(LocalIp())}&port={WebSocketPort}&token={Uri.EscapeDataString(_pairToken)}";
 
-                var transfer = new Grid { Margin = new Thickness(0, 70, 0, 40) };
+                var transfer = new Grid { Margin = new Thickness(0, 70, 0, 36) };
                 transfer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(330) });
                 transfer.ColumnDefinitions.Add(new ColumnDefinition());
+
                 var qr = new Border
                 {
                     Background = Brushes.White,
@@ -146,17 +148,17 @@ public partial class MainWindow
                 transfer.Children.Add(qr);
 
                 var copy = new StackPanel { Margin = new Thickness(24, 16, 0, 0) };
-                copy.Children.Add(new TextBlock { Text = "Перенос профилей", FontSize = 20, FontWeight = FontWeights.SemiBold });
+                copy.Children.Add(new TextBlock { Text = "Импорт через устройство", FontSize = 20, FontWeight = FontWeights.SemiBold });
                 copy.Children.Add(new TextBlock
                 {
-                    Text = "1. На телефоне откройте NEXO и выберите «Перенос / библиотека».\n\n2. Отсканируйте этот QR.\n\n3. Подтвердите биометрию или PIN устройства.\n\n4. Выберите компьютер, данные которого нужно перенести.",
+                    Text = "1. На исходном ПК передайте нужные профили или полный набор настроек на телефон.\n\n2. В NEXO Mobile нажмите QR и отсканируйте код слева.\n\n3. Телефон автоматически передаст подготовленный пакет на этот ПК.",
                     Foreground = (Brush)FindResource("Muted"),
                     TextWrapping = TextWrapping.Wrap,
                     Margin = new Thickness(0, 12, 0, 0)
                 });
                 copy.Children.Add(new TextBlock
                 {
-                    Text = "Ожидание выбора на мобильном устройстве…",
+                    Text = "Ожидание пакета переноса…",
                     Foreground = (Brush)FindResource("Blue"),
                     FontWeight = FontWeights.SemiBold,
                     Margin = new Thickness(0, 18, 0, 0)
@@ -170,7 +172,7 @@ public partial class MainWindow
             }
             catch (Exception ex)
             {
-                MessageBox.Show(window, $"Не удалось запустить перенос.\n\n{ex.Message}", "NEXO");
+                MessageBox.Show(window, $"Не удалось запустить импорт.\n\n{ex.Message}", "NEXO");
             }
         };
 
@@ -262,6 +264,9 @@ public partial class MainWindow
 
     private async Task<bool> V13HandleRemoteMessageAsync(JsonElement root, string messageType, string clientId)
     {
+        if (await V14HandleTransferMessageAsync(root, messageType, clientId))
+            return true;
+
         if (messageType == "workspaceBackupRequest")
         {
             await V13SendWorkspaceBackupToClientAsync(clientId);
@@ -378,7 +383,7 @@ public partial class MainWindow
         lock (_clients) sockets = _clients.Where(x => x.State == WebSocketState.Open).ToList();
         if (sockets.Count == 0)
         {
-            MessageBox.Show(this, "Подключите телефон или планшет к NEXO по Wi‑Fi.\nНа мобильном устройстве потребуется подтвердить биометрию/PIN.", "NEXO");
+            MessageBox.Show(this, "Подключите телефон или планшет к NEXO по Wi‑Fi.", "NEXO");
             return;
         }
 
