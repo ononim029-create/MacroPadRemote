@@ -106,6 +106,7 @@ jobs:
           cp src/mobile/macropad_mobile/pubspec.yaml build-mobile/pubspec.yaml
           cp src/mobile/macropad_mobile/lib/main.dart build-mobile/lib/main.dart
           cp src/mobile/macropad_mobile/lib/v12_workspace.dart build-mobile/lib/v12_workspace.dart
+          cp src/mobile/macropad_mobile/lib/v13_backup.dart build-mobile/lib/v13_backup.dart
           rm -rf build-mobile/test
           mkdir -p build-mobile/android/app/src/main/kotlin/com/example/nexo
           mkdir -p build-mobile/android/app/src/main/res/drawable
