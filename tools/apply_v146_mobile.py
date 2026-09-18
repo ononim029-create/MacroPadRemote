@@ -470,10 +470,12 @@ def main() -> None:
         final canvasSize = Size(totalW, totalH);
         final workOrigin = Offset(_workspaceLeftInset, _workspaceTopInset);
         final zeroScale = _defaultDeckScale(viewport, canvasSize);
-        final currentScale = _deckTransform.value.getMaxScaleOnAxis();
+        final maxScale = zeroScale * _maximumDeckZoomFactor(rows, columns);
 
         _deckViewportSize = viewport;
         _deckCanvasSize = canvasSize;
+        _deckMinScale = zeroScale;
+        _deckMaxScale = max(zeroScale, maxScale);
 '''
     new_viewport = r'''        final fullViewport = Size(
           constraints.maxWidth,
@@ -499,11 +501,18 @@ def main() -> None:
         final zeroScale = _defaultDeckScale(viewport, canvasSize);
         final currentScale =
             _deckTransform.value.getMaxScaleOnAxis();
+        final maxScale =
+            zeroScale * _maximumDeckZoomFactor(rows, columns);
 
         _deckFullViewportSize = fullViewport;
         _deckViewportSize = viewport;
         _deckCanvasSize = canvasSize;
+        _deckMinScale = _deckGeometryInitialized
+            ? min(zeroScale, currentScale)
+            : zeroScale;
+        _deckMaxScale = max(_deckMinScale, maxScale);
 '''
+
     text = replace_once(
         text,
         old_viewport,
