@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -31,6 +34,25 @@ public sealed class V141LinkedDevice
 
 public partial class MainWindow
 {
+    private void V141UpdateProfileRevision()
+    {
+        try
+        {
+            var raw = JsonSerializer.Serialize(_profiles, _json);
+            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(raw)));
+            if (string.Equals(hash, _state.ProfileWorkspaceHash, StringComparison.Ordinal))
+                return;
+
+            _state.ProfileWorkspaceHash = hash;
+            _state.ProfileWorkspaceUpdatedUtc = DateTime.UtcNow;
+        }
+        catch
+        {
+            if (_state.ProfileWorkspaceUpdatedUtc == DateTime.MinValue)
+                _state.ProfileWorkspaceUpdatedUtc = DateTime.UtcNow;
+        }
+    }
+
     private string? V141PromptNewProfileName(Window? owner = null)
     {
         while (true)
