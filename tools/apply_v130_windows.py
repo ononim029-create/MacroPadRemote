@@ -121,6 +121,27 @@ def patch_windows() -> None:
         };
         root.Children.Add(libraryButton);
 
+        var updateSourceButton = new Button
+        {
+            Content = string.IsNullOrWhiteSpace(_state.SourceServerId)
+                ? "Обновить с исходного устройства"
+                : $"Обновить с «{_state.SourceServerName}»",
+            Height = 36,
+            Margin = new Thickness(0, 4, 0, 4),
+            IsEnabled = !string.IsNullOrWhiteSpace(_state.SourceServerId)
+        };
+        updateSourceButton.Click += async (_, _) =>
+        {
+            win.Hide();
+            await V13UpdateFromSourceAsync();
+            updateSourceButton.Content = string.IsNullOrWhiteSpace(_state.SourceServerId)
+                ? "Обновить с исходного устройства"
+                : $"Обновить с «{_state.SourceServerName}»";
+            updateSourceButton.IsEnabled = !string.IsNullOrWhiteSpace(_state.SourceServerId);
+            if (!win.IsVisible) win.Show();
+        };
+        root.Children.Add(updateSourceButton);
+
         void RebuildDeviceRows()''',
         "v1.3 library button",
     )
@@ -176,7 +197,10 @@ def patch_windows() -> None:
     public string ActiveProfileId { get; set; } = "";
     public string Transport { get; set; } = "Wifi";
     public bool SetupCompleted { get; set; } = false;
-    public DateTime WorkspaceUpdatedUtc { get; set; } = DateTime.UtcNow;''',
+    public DateTime WorkspaceUpdatedUtc { get; set; } = DateTime.UtcNow;
+    public string SourceServerId { get; set; } = "";
+    public string SourceServerName { get; set; } = "";
+    public DateTime SourceWorkspaceUpdatedUtc { get; set; } = DateTime.MinValue;''',
         "v1.3 app state fields",
     )
 
