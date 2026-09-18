@@ -34,6 +34,7 @@ public partial class MainWindow
         tabs.Items.Add(new TabItem { Header = "Общее", Content = V14BuildGeneralTab(win) });
         tabs.Items.Add(new TabItem { Header = "Оборудование", Content = V14BuildHardwareTab(win) });
         tabs.Items.Add(new TabItem { Header = "Профили", Content = V14BuildProfilesTab(win) });
+        tabs.Items.Add(new TabItem { Header = "Устройства", Content = V14BuildDevicesTab(win) });
         tabs.SelectedIndex = 2;
         win.Content = tabs;
         win.ShowDialog();
