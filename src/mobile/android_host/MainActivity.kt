@@ -4,11 +4,11 @@ import android.content.Context
 import android.hardware.input.InputManager
 import android.view.InputDevice
 import android.view.KeyEvent
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity(), InputManager.InputDeviceListener {
+class MainActivity : FlutterFragmentActivity(), InputManager.InputDeviceListener {
     private val channelName = "nexo/device"
     private lateinit var inputManager: InputManager
     private var channel: MethodChannel? = null
