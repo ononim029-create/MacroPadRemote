@@ -61,13 +61,32 @@ def main() -> None:
 
     text = replace_once(
         text,
+        '''        _state.Profiles ??= new List<Profile>();
+        _state.TrustedDevices ??= new List<TrustedClient>();''',
+        '''        _state.Profiles ??= new List<Profile>();
+        var legacyProfiles = _state.Profiles.ToList();
+        _state.Profiles = V14LoadProfilesFromProgramFolder(legacyProfiles);
+        _state.TrustedDevices ??= new List<TrustedClient>();''',
+        "load profiles from program Profiles folder with legacy migration",
+    )
+
+    text = replace_once(
+        text,
         '''        _state.WorkspaceUpdatedUtc = DateTime.UtcNow;
         try { File.WriteAllText(_statePath, JsonSerializer.Serialize(_state, _json)); } catch { }
         _ = V13BroadcastWorkspaceBackupOnlyAsync();''',
         '''        _state.WorkspaceUpdatedUtc = DateTime.UtcNow;
-        try { File.WriteAllText(_statePath, JsonSerializer.Serialize(_state, _json)); } catch { }
+        try
+        {
+            V14PersistProfilesToProgramFolder();
+            File.WriteAllText(_statePath, V14SerializeStateWithoutProfiles());
+        }
+        catch (Exception ex)
+        {
+            DeviceStatus.Text = $"Ошибка сохранения профилей: {ex.Message}";
+        }
         _ = V14OnWorkspaceChangedAsync();''',
-        "disable passive mobile backup and use explicit link sync",
+        "persist profiles beside executable and keep state profile-free",
     )
 
     text = replace_once(
