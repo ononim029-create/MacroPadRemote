@@ -189,8 +189,12 @@ def main() -> None:
       max(zeroScale * _maximumDeckZoomFactor(rows, columns), zeroScale),
     ).toDouble();
 
-    _deckMinScale = zeroScale;
-    _deckMaxScale = max(zeroScale, zeroScale * _maximumDeckZoomFactor(rows, columns));
+    final workChangedPrecheck = !_deckPreviousViewport.isEmpty
+        && ((_deckPreviousWorkOrigin - workOrigin).distanceSquared > .01
+            || (_deckPreviousViewport.width - viewport.width).abs() > .1
+            || (_deckPreviousViewport.height - viewport.height).abs() > .1);
+    _deckMinScale = workChangedPrecheck ? min(zeroScale, rawScale) : zeroScale;
+    _deckMaxScale = max(_deckMinScale, zeroScale * _maximumDeckZoomFactor(rows, columns));
 
     if (!_deckGeometryInitialized) {
       _deckGeometryInitialized = true;
