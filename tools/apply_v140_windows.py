@@ -54,6 +54,34 @@ def main() -> None:
     )
     text = replace_once(
         text,
+        '    public string DefaultProfileId { get; set; } = "";\n    public string SourceServerId { get; set; } = "";',
+        '    public string DefaultProfileId { get; set; } = "";\n    public bool DeviceLinkEnabled { get; set; } = false;\n    public bool DeviceLinkAutoUpdate { get; set; } = false;\n    public string DeviceLinkSourceServerId { get; set; } = "";\n    public string DeviceLinkSourceServerName { get; set; } = "";\n    public DateTime DeviceLinkUpdatedUtc { get; set; } = DateTime.MinValue;\n    public string SourceServerId { get; set; } = "";',
+        "device link state",
+    )
+
+    text = replace_once(
+        text,
+        '''        _state.WorkspaceUpdatedUtc = DateTime.UtcNow;
+        try { File.WriteAllText(_statePath, JsonSerializer.Serialize(_state, _json)); } catch { }
+        _ = V13BroadcastWorkspaceBackupOnlyAsync();''',
+        '''        _state.WorkspaceUpdatedUtc = DateTime.UtcNow;
+        try { File.WriteAllText(_statePath, JsonSerializer.Serialize(_state, _json)); } catch { }
+        _ = V14OnWorkspaceChangedAsync();''',
+        "disable passive mobile backup and use explicit link sync",
+    )
+
+    text = replace_once(
+        text,
+        '''        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(Snapshot(), _json));
+        await socket.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None);
+        await V13SendWorkspaceBackupAsync(socket);''',
+        '''        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(Snapshot(), _json));
+        await socket.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None);
+        await V14SyncLinkOnClientConnectedAsync(socket);''',
+        "sync links only when enabled",
+    )
+    text = replace_once(
+        text,
         "    private bool _capturingHotkey;\n",
         "    private bool _capturingHotkey;\n    private readonly List<string> _v14CombinationTokens = new();\n",
         "combination recorder state",
