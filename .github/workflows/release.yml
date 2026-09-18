@@ -139,6 +139,19 @@ jobs:
           manifest.write_text(s)
           gradle = Path('build-mobile/android/app/build.gradle.kts')
           gradle.write_text(gradle.read_text().replace('minSdk = flutter.minSdkVersion', 'minSdk = 24'))
+          for styles_path in [
+              Path('build-mobile/android/app/src/main/res/values/styles.xml'),
+              Path('build-mobile/android/app/src/main/res/values-night/styles.xml'),
+          ]:
+              if styles_path.exists():
+                  styles = styles_path.read_text()
+                  styles = re.sub(
+                      r'(<style name="LaunchTheme" parent=")[^"]+(")',
+                      r'\\1Theme.AppCompat.DayNight\\2',
+                      styles,
+                      count=1,
+                  )
+                  styles_path.write_text(styles)
           PY
       - name: Analyze and build APK
         shell: bash
