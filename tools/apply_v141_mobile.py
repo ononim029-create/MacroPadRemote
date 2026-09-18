@@ -23,6 +23,8 @@ def main() -> None:
           await widget.transport.send({
             'type': 'transferPackageResponse',
             'sourceServerId': requestedServerId,
+            'automatic': json['automatic'] == true,
+            'manualLinkRefresh': json['manualLinkRefresh'] == true,
             'workspace': workspace,
           });
         } catch (_) {}
