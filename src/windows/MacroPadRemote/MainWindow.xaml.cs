@@ -193,6 +193,17 @@ public partial class MainWindow : Window
         Focus();
     }
 
+    public void RestoreFromSecondLaunch()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(new Action(RestoreFromSecondLaunch));
+            return;
+        }
+
+        ShowFromTray();
+    }
+
     private async Task ExitFromTrayAsync()
     {
         _allowExit = true;
