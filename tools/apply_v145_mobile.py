@@ -42,19 +42,21 @@ def main() -> None:
     text = replace_between(
         text,
         "  Offset _defaultModelCenter(Size viewport, Size canvas, double scale) {",
-        "\n  Widget _remoteTile(TileSnapshot tile, double scale) {",
+        "\n  void _fitDeck() {",
         r'''  Size _realModelSpaceSize(Size deck, Size viewport) {
     if (deck.isEmpty || viewport.isEmpty) {
       return deck;
     }
 
-    // User-defined invariant: S(model) = 2 * S(tile block), exactly.
-    // The aspect ratio follows the current usable workspace as far as possible,
-    // while both model dimensions are guaranteed to remain >= the tile block.
+    // Exact invariant requested by the user:
+    // S(model space) = 2 * S(tile block).
     final blockArea = deck.width * deck.height;
     final modelArea = blockArea * 2.0;
     final blockAspect = deck.width / deck.height;
     final workspaceAspect = viewport.width / viewport.height;
+
+    // These limits guarantee that model width/height never become smaller
+    // than the tile block while still following the work-area proportions.
     final modelAspect = workspaceAspect
         .clamp(blockAspect / 2.0, blockAspect * 2.0)
         .toDouble();
@@ -63,11 +65,6 @@ def main() -> None:
       sqrt(modelArea * modelAspect),
       sqrt(modelArea / modelAspect),
     );
-  }
-
-  double _maximumDeckZoomFactor(int rows, int columns) {
-    final cellCount = max(1, rows * columns);
-    return sqrt(cellCount * 2.0).clamp(2.0, 18.0).toDouble();
   }
 
   double _defaultDeckScale(Size viewport, Size canvas) {
@@ -80,28 +77,88 @@ def main() -> None:
 
   Offset _defaultBlockCenter(Size viewport, Size canvas, double scale) {
     final model = _realModelSpaceSize(canvas, viewport);
-    final verticalAllowance = max(0.0, (model.height - canvas.height) * scale / 2);
+    final verticalAllowance = max(
+      0.0,
+      (model.height - canvas.height) * scale / 2,
+    );
     final desiredUp = viewport.height * .13;
     return Offset(0, -min(desiredUp, verticalAllowance));
   }
 
-  Matrix4 _matrixWithScaleAndCenter(double scale, Offset center) {
-    return Matrix4.diagonal3Values(scale, scale, 1)
-      ..setTranslationRaw(center.dx, center.dy, 0);
+''',
+        "exact 2x-area model helpers",
+    )
+
+    text = replace_between(
+        text,
+        "  void _fitDeck() {",
+        "\n  @override\n  void didChangeDependencies() {",
+        r'''  void _fitDeck() {
+    _deckReturnController.stop();
+    if (_deckViewportSize.isEmpty || _deckCanvasSize.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _fitDeck();
+        }
+      });
+      return;
+    }
+
+    final fitScale = _defaultDeckScale(_deckViewportSize, _deckCanvasSize);
+    _deckMinScale = fitScale;
+    _deckMaxScale = max(_deckMaxScale, fitScale * 2);
+    _deckModelCenter = Offset.zero;
+
+    final begin = _deckTransform.value.clone();
+    final target = _matrixWithScaleAndCenter(
+      fitScale,
+      _defaultBlockCenter(_deckViewportSize, _deckCanvasSize, fitScale),
+    );
+
+    _deckReturnAnimation = Matrix4Tween(begin: begin, end: target)
+        .animate(CurvedAnimation(
+          parent: _deckReturnController,
+          curve: Curves.easeOutCubic,
+        ));
+    final resetFuture = _deckReturnController.forward(from: 0);
+    resetFuture.whenComplete(() {
+      if (mounted) {
+        unawaited(_saveDeckView());
+      }
+    });
   }
 
-  Matrix4 _boundedDeckMatrix(Matrix4 candidate) {
+''',
+        "exact 2x-area default view",
+    )
+
+    text = replace_between(
+        text,
+        "  Matrix4 _boundedDeckMatrix(Matrix4 candidate) {",
+        "\n  Offset _clearActualPanelOverlap(Offset center, double scale, Size viewport) {",
+        r'''  Matrix4 _boundedDeckMatrix(Matrix4 candidate) {
     if (_deckViewportSize.isEmpty || _deckCanvasSize.isEmpty) {
       return candidate;
     }
 
-    final scale = candidate.getMaxScaleOnAxis().clamp(_deckMinScale, _deckMaxScale).toDouble();
+    final scale = candidate.getMaxScaleOnAxis()
+        .clamp(_deckMinScale, _deckMaxScale)
+        .toDouble();
     var center = Offset(candidate.storage[12], candidate.storage[13]);
-    final model = _realModelSpaceSize(_deckCanvasSize, _deckViewportSize);
+    final model = _realModelSpaceSize(
+      _deckCanvasSize,
+      _deckViewportSize,
+    );
 
-    // The whole tile block must remain inside the hidden model-space rectangle.
-    final allowanceX = max(0.0, (model.width - _deckCanvasSize.width) * scale / 2);
-    final allowanceY = max(0.0, (model.height - _deckCanvasSize.height) * scale / 2);
+    // The entire tile block remains inside the hidden model-space rectangle.
+    final allowanceX = max(
+      0.0,
+      (model.width - _deckCanvasSize.width) * scale / 2,
+    );
+    final allowanceY = max(
+      0.0,
+      (model.height - _deckCanvasSize.height) * scale / 2,
+    );
 
     center = Offset(
       center.dx.clamp(
@@ -117,14 +174,22 @@ def main() -> None:
     return _matrixWithScaleAndCenter(scale, center);
   }
 
-  Offset _clearActualPanelOverlap(Offset center, double scale, Size viewport) {
+''',
+        "exact model bounds",
+    )
+
+    text = replace_between(
+        text,
+        "  Offset _clearActualPanelOverlap(Offset center, double scale, Size viewport) {",
+        "\n  void _handleDeckGeometryChange({",
+        r'''  Offset _clearActualPanelOverlap(Offset center, double scale, Size viewport) {
     final halfW = _deckCanvasSize.width * scale / 2;
     final halfH = _deckCanvasSize.height * scale / 2;
     var x = center.dx;
     var y = center.dy;
 
-    // The usable viewport already excludes opened auxiliary panels.
-    // Shift only when the tile rectangle ACTUALLY crosses that viewport edge.
+    // The usable viewport already excludes open panels. Correct position only
+    // when the tile rectangle actually crosses the newly available edge.
     if (halfW * 2 <= viewport.width) {
       x = x.clamp(
         -viewport.width / 2 + halfW,
@@ -137,7 +202,6 @@ def main() -> None:
         viewport.height / 2 - halfH,
       ).toDouble();
     }
-
     return Offset(x, y);
   }
 
@@ -149,8 +213,14 @@ def main() -> None:
     Size viewport,
   ) {
     final model = _realModelSpaceSize(canvas, viewport);
-    final allowanceX = max(0.0, (model.width - canvas.width) * scale / 2);
-    final allowanceY = max(0.0, (model.height - canvas.height) * scale / 2);
+    final allowanceX = max(
+      0.0,
+      (model.width - canvas.width) * scale / 2,
+    );
+    final allowanceY = max(
+      0.0,
+      (model.height - canvas.height) * scale / 2,
+    );
 
     return Offset(
       preferredModelCenter.dx
@@ -162,7 +232,15 @@ def main() -> None:
     );
   }
 
-  void _handleDeckGeometryChange({
+''',
+        "panel overlap and model center",
+    )
+
+    text = replace_between(
+        text,
+        "  void _handleDeckGeometryChange({",
+        "\n  void _clampDeckTransform() {",
+        r'''  void _handleDeckGeometryChange({
     required Offset workOrigin,
     required Size viewport,
     required Size canvas,
@@ -191,13 +269,15 @@ def main() -> None:
     final canvasChanged = (_deckPreviousCanvas.width - canvas.width).abs() > .1
         || (_deckPreviousCanvas.height - canvas.height).abs() > .1;
 
-    // Opening/closing a panel never forces a zoom jump.
+    // A panel opening/closing must not cause an automatic zoom jump.
     _deckMinScale = workChanged ? min(zeroScale, rawScale) : zeroScale;
     _deckMaxScale = max(
       _deckMinScale,
       zeroScale * _maximumDeckZoomFactor(rows, columns),
     );
-    final scale = rawScale.clamp(_deckMinScale, _deckMaxScale).toDouble();
+    final scale = rawScale
+        .clamp(_deckMinScale, _deckMaxScale)
+        .toDouble();
 
     if (!_deckGeometryInitialized) {
       _deckGeometryInitialized = true;
@@ -221,8 +301,8 @@ def main() -> None:
     var modelCenter = previousModelCenter;
 
     if (workChanged && !previousViewport.isEmpty) {
-      // Keep absolute screen coordinates first. A panel that does not overlap
-      // the tiles therefore produces no visual movement at all.
+      // Preserve absolute screen position first, so a panel that does not
+      // overlap the tiles does not move them.
       final oldBlockScreenCenter = Offset(
         previousOrigin.dx + previousViewport.width / 2 + blockCenter.dx,
         previousOrigin.dy + previousViewport.height / 2 + blockCenter.dy,
@@ -241,8 +321,8 @@ def main() -> None:
         oldModelScreenCenter.dy - workOrigin.dy - viewport.height / 2,
       );
 
-      // Reshape the hidden model space around the preserved block if needed,
-      // instead of moving the block merely because panel geometry changed.
+      // Reshape/recenter the hidden model around the preserved block when
+      // necessary instead of moving the visible block for no reason.
       modelCenter = _modelCenterThatContainsBlock(
         modelCenter,
         blockCenter,
@@ -251,16 +331,18 @@ def main() -> None:
         viewport,
       );
 
-      // Only real overlap with the newly reduced work area causes movement.
-      final cleared = _clearActualPanelOverlap(blockCenter, scale, viewport);
+      // Only actual intersection with the reduced visible work area moves it.
+      final cleared = _clearActualPanelOverlap(
+        blockCenter,
+        scale,
+        viewport,
+      );
       final correction = cleared - blockCenter;
       blockCenter = cleared;
       modelCenter += correction;
     }
 
     if (canvasChanged && !workChanged) {
-      // Grid count/size changed: rebuild the 2x-area model around the current
-      // visual location without an arbitrary snap.
       modelCenter = blockCenter;
     }
 
@@ -276,17 +358,15 @@ def main() -> None:
     _deckClampGuard = false;
   }
 
-  void _clampDeckTransform() {
-    if (_deckClampGuard || _deckViewportSize.isEmpty || _deckCanvasSize.isEmpty) {
-      return;
-    }
+''',
+        "exact model geometry changes",
+    )
 
-    _deckClampGuard = true;
-    _deckTransform.value = _boundedDeckMatrix(_deckTransform.value);
-    _deckClampGuard = false;
-  }
-
-  void _applyPendingDeckRestore() {
+    text = replace_between(
+        text,
+        "  void _applyPendingDeckRestore() {",
+        "\n  void _beginDeckInteraction(ScaleStartDetails details) {",
+        r'''  void _applyPendingDeckRestore() {
     final pending = _pendingDeckRestore;
     if (pending == null || _deckViewportSize.isEmpty || _deckCanvasSize.isEmpty) {
       return;
@@ -294,11 +374,17 @@ def main() -> None:
 
     _pendingDeckRestore = null;
     _deckReturnController.stop();
-    final zeroScale = _defaultDeckScale(_deckViewportSize, _deckCanvasSize);
+    final zeroScale = _defaultDeckScale(
+      _deckViewportSize,
+      _deckCanvasSize,
+    );
     final restoredScale = pending.getMaxScaleOnAxis()
         .clamp(zeroScale, _deckMaxScale)
         .toDouble();
-    final restoredCenter = Offset(pending.storage[12], pending.storage[13]);
+    final restoredCenter = Offset(
+      pending.storage[12],
+      pending.storage[13],
+    );
 
     _deckModelCenter = _modelCenterThatContainsBlock(
       Offset.zero,
@@ -308,62 +394,58 @@ def main() -> None:
       _deckViewportSize,
     );
     _deckTransform.value = _boundedDeckMatrix(
-      _matrixWithScaleAndCenter(restoredScale, restoredCenter),
+      _matrixWithScaleAndCenter(
+        restoredScale,
+        restoredCenter,
+      ),
     );
   }
 
-  void _fitDeck() {
-    _deckReturnController.stop();
-    if (_deckViewportSize.isEmpty || _deckCanvasSize.isEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          _fitDeck();
-        }
-      });
-      return;
-    }
+''',
+        "restore exact model space",
+    )
 
-    final fitScale = _defaultDeckScale(_deckViewportSize, _deckCanvasSize);
-    _deckMinScale = fitScale;
-    _deckMaxScale = max(_deckMaxScale, fitScale * 2);
-    _deckModelCenter = Offset.zero;
-
-    final begin = _deckTransform.value.clone();
-    final target = _matrixWithScaleAndCenter(
-      fitScale,
-      _defaultBlockCenter(_deckViewportSize, _deckCanvasSize, fitScale),
-    );
-    _deckReturnAnimation = Matrix4Tween(begin: begin, end: target)
-        .animate(CurvedAnimation(parent: _deckReturnController, curve: Curves.easeOutCubic));
-    final resetFuture = _deckReturnController.forward(from: 0);
-    resetFuture.whenComplete(() {
-      if (mounted) {
-        unawaited(_saveDeckView());
-      }
-    });
-  }
-
-  void _beginDeckInteraction(ScaleStartDetails details) {
+    text = replace_between(
+        text,
+        "  void _beginDeckInteraction(ScaleStartDetails details) {",
+        "\n  void _updateDeckInteraction(ScaleUpdateDetails details) {",
+        r'''  void _beginDeckInteraction(ScaleStartDetails details) {
     _deckReturnController.stop();
     final current = _deckTransform.value;
     _deckGestureScaleAnchor = current.getMaxScaleOnAxis();
-    _deckGestureCenterAnchor = Offset(current.storage[12], current.storage[13]);
+    _deckGestureCenterAnchor = Offset(
+      current.storage[12],
+      current.storage[13],
+    );
     _deckGestureFocalAnchor = details.focalPoint;
     _deckGestureScaleFactorAnchor = 1.0;
     _deckGesturePointerCount = 0;
   }
 
-  void _updateDeckInteraction(ScaleUpdateDetails details) {
+''',
+        "gesture start anchors",
+    )
+
+    text = replace_between(
+        text,
+        "  void _updateDeckInteraction(ScaleUpdateDetails details) {",
+        "\n  Widget _deckCanvas(ProfileSnapshot p) {",
+        r'''  void _updateDeckInteraction(ScaleUpdateDetails details) {
     if (_deckClampGuard) {
       return;
     }
 
     final current = _deckTransform.value;
 
+    // When a second finger is added/removed, use the CURRENT state as the new
+    // anchor. This prevents jumps between pan and zoom.
     if (_deckGesturePointerCount != details.pointerCount) {
       _deckGesturePointerCount = details.pointerCount;
       _deckGestureScaleAnchor = current.getMaxScaleOnAxis();
-      _deckGestureCenterAnchor = Offset(current.storage[12], current.storage[13]);
+      _deckGestureCenterAnchor = Offset(
+        current.storage[12],
+        current.storage[13],
+      );
       _deckGestureFocalAnchor = details.focalPoint;
       _deckGestureScaleFactorAnchor = details.scale;
       return;
@@ -373,7 +455,7 @@ def main() -> None:
     var center = _deckGestureCenterAnchor;
 
     if (!scaleLocked && details.pointerCount > 1) {
-      // Multi-touch changes ONLY scale. The full tile-block center is fixed.
+      // Multi-touch changes scale ONLY. Tile-block center stays fixed.
       final factor = _deckGestureScaleFactorAnchor == 0
           ? 1.0
           : details.scale / _deckGestureScaleFactorAnchor;
@@ -381,8 +463,9 @@ def main() -> None:
           .clamp(_deckMinScale, _deckMaxScale)
           .toDouble();
     } else if (!panLocked && details.pointerCount == 1) {
-      // Single touch changes ONLY position.
-      center = _deckGestureCenterAnchor + (details.focalPoint - _deckGestureFocalAnchor);
+      // One finger changes position ONLY.
+      center = _deckGestureCenterAnchor
+          + (details.focalPoint - _deckGestureFocalAnchor);
     }
 
     _deckClampGuard = true;
@@ -392,150 +475,8 @@ def main() -> None:
     _deckClampGuard = false;
   }
 
-  Widget _deckCanvas(ProfileSnapshot p) {
-    return LayoutBuilder(
-      builder: (_, constraints) {
-        final columns = p.columns.clamp(1, 12).toInt();
-        final rows = p.rows.clamp(1, 12).toInt();
-        const gapBase = 7.0;
-        const padBase = 10.0;
-        final compact = widget.formFactor == ClientFormFactor.phone
-            && MediaQuery.orientationOf(context) == Orientation.landscape;
-
-        // Cell geometry is based on the full pre-panel workspace. Panels can
-        // shrink the usable work area but never resize the tiles themselves.
-        final baseViewportW = constraints.maxWidth + _workspaceLeftInset + _workspaceRightInset;
-        final baseViewportH = constraints.maxHeight + _workspaceTopInset + _workspaceBottomInset;
-        final availableW =
-            (baseViewportW - padBase * 2 - gapBase * (columns - 1)).clamp(1.0, double.infinity);
-        final availableH =
-            (baseViewportH - padBase * 2 - gapBase * (rows - 1)).clamp(1.0, double.infinity);
-        final fitW = availableW / columns;
-        final fitH = availableH / rows;
-        final cellW = min(fitW, fitH / .76).clamp(18.0, 150.0);
-        final cellH = cellW * .76;
-        final uiScale = (cellW / 105).clamp(.38, 1.18);
-        final packed = packTiles(p.tiles, rows, columns);
-        final totalW = padBase * 2 + columns * cellW + (columns - 1) * gapBase;
-        final totalH = padBase * 2 + rows * cellH + (rows - 1) * gapBase;
-
-        final viewport = Size(constraints.maxWidth, constraints.maxHeight);
-        final canvasSize = Size(totalW, totalH);
-        final workOrigin = Offset(_workspaceLeftInset, _workspaceTopInset);
-        final zeroScale = _defaultDeckScale(viewport, canvasSize);
-        final currentScale = _deckTransform.value.getMaxScaleOnAxis();
-
-        _deckViewportSize = viewport;
-        _deckCanvasSize = canvasSize;
-        _deckMinScale = _deckGeometryInitialized ? min(zeroScale, currentScale) : zeroScale;
-        _deckMaxScale = max(
-          _deckMinScale,
-          zeroScale * _maximumDeckZoomFactor(rows, columns),
-        );
-
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) {
-            return;
-          }
-          _handleDeckGeometryChange(
-            workOrigin: workOrigin,
-            viewport: viewport,
-            canvas: canvasSize,
-            rows: rows,
-            columns: columns,
-          );
-        });
-
-        final canvas = SizedBox(
-          width: totalW,
-          height: totalH,
-          child: Stack(children: [
-            for (final item in packed)
-              Positioned(
-                left: padBase + item.column * (cellW + gapBase),
-                top: padBase + item.row * (cellH + gapBase),
-                width: item.columnSpan * cellW + (item.columnSpan - 1) * gapBase,
-                height: item.rowSpan * cellH + (item.rowSpan - 1) * gapBase,
-                child: _remoteTile(item.tile, uiScale),
-              ),
-          ]),
-        );
-
-        return Stack(children: [
-          Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onScaleStart: _beginDeckInteraction,
-              onScaleUpdate: _updateDeckInteraction,
-              onScaleEnd: (_) {
-                _clampDeckTransform();
-                unawaited(_saveDeckView());
-                unawaited(_saveWorkspaceUi());
-              },
-              child: ClipRect(
-                child: AnimatedBuilder(
-                  animation: _deckTransform,
-                  child: canvas,
-                  builder: (_, child) {
-                    final matrix = _deckTransform.value;
-                    final scale = matrix.getMaxScaleOnAxis();
-                    final center = Offset(matrix.storage[12], matrix.storage[13]);
-                    return Center(
-                      child: Transform.translate(
-                        offset: center,
-                        child: Transform.scale(
-                          scale: scale,
-                          alignment: Alignment.center,
-                          child: child,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            right: compact ? 5 : 8,
-            top: compact ? 5 : 8,
-            child: Material(
-              color: const Color(0xee202326),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-                side: const BorderSide(color: mpBorder),
-              ),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                IconButton(
-                  tooltip: scaleLocked ? 'Разблокировать масштаб' : 'Зафиксировать масштаб',
-                  onPressed: _toggleScaleLock,
-                  icon: Icon(scaleLocked ? Icons.lock : Icons.lock_open),
-                  iconSize: compact ? 16 : 19,
-                  visualDensity: VisualDensity.compact,
-                ),
-                IconButton(
-                  tooltip: panLocked ? 'Разблокировать перемещение' : 'Заблокировать перемещение',
-                  onPressed: _togglePanLock,
-                  icon: Icon(panLocked ? Icons.pan_tool_alt : Icons.pan_tool_outlined),
-                  iconSize: compact ? 16 : 19,
-                  visualDensity: VisualDensity.compact,
-                ),
-                IconButton(
-                  tooltip: 'Вид по умолчанию',
-                  onPressed: _fitDeck,
-                  icon: const Icon(Icons.center_focus_strong),
-                  iconSize: compact ? 16 : 19,
-                  visualDensity: VisualDensity.compact,
-                ),
-              ]),
-            ),
-          ),
-        ]);
-      },
-    );
-  }
-
 ''',
-        "real model area exactly 2x",
+        "seamless pan zoom switching",
     )
 
     path.write_text(text, encoding="utf-8")
