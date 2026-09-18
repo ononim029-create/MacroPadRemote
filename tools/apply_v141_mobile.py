@@ -23,8 +23,6 @@ def main() -> None:
           await widget.transport.send({
             'type': 'transferPackageResponse',
             'sourceServerId': requestedServerId,
-            'automatic': json['automatic'] == true,
-            'manualLinkRefresh': json['manualLinkRefresh'] == true,
             'workspace': workspace,
           });
         } catch (_) {}
@@ -76,7 +74,10 @@ def main() -> None:
         } catch (_) {}
         return;
       }
-""" + marker
+""" + marker.replace(
+  "            'sourceServerId': requestedServerId,\n            'workspace': workspace,",
+  "            'sourceServerId': requestedServerId,\n            'automatic': json['automatic'] == true,\n            'manualLinkRefresh': json['manualLinkRefresh'] == true,\n            'workspace': workspace,"
+)
 
     text = replace_once(text, marker, replacement, "v1.4.1 bidirectional link protocol")
     path.write_text(text, encoding="utf-8")
