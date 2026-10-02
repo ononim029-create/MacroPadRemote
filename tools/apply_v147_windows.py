@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,12 +29,22 @@ def main() -> None:
         "responsive root rows",
     )
 
-    text = replace_once(
-        text,
-        '<ColumnDefinition Width="0"/>\n            <ColumnDefinition Width="*"/>\n            <ColumnDefinition Width="385"/>',
-        '<ColumnDefinition x:Name="ResponsiveProfilesColumn" Width="0"/>\n            <ColumnDefinition Width="*"/>\n            <ColumnDefinition x:Name="ResponsiveActionLibraryColumn" Width="385"/>',
-        "responsive root columns",
+    root_columns = re.compile(
+        r'(<Grid\.ColumnDefinitions>\s*)'
+        r'<ColumnDefinition\s+Width="[^"]+"\s*/>\s*'
+        r'<ColumnDefinition\s+Width="\*"\s*/>\s*'
+        r'<ColumnDefinition\s+Width="[^"]+"\s*/>'
+        r'(\s*</Grid\.ColumnDefinitions>)',
+        re.DOTALL,
     )
+    replacement = (
+        r'\1<ColumnDefinition x:Name="ResponsiveProfilesColumn" Width="0"/>\n'
+        r'            <ColumnDefinition Width="*"/>\n'
+        r'            <ColumnDefinition x:Name="ResponsiveActionLibraryColumn" Width="385"/>\2'
+    )
+    text, count = root_columns.subn(replacement, text, count=1)
+    if count != 1:
+        raise RuntimeError(f"responsive root columns: expected one root three-column grid, got {count}")
 
     text = replace_once(
         text,
