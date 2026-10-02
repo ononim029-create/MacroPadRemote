@@ -60,18 +60,16 @@ def main() -> None:
         "direct QR button",
     )
 
-    text = replace_once(
-        text,
-        """                Text(transport == TransportKind.wifi
+    old_hint = """                Text(transport == TransportKind.wifi
                     ? 'Устройства в одной сети обнаруживаются автоматически. QR нужен только при первой привязке.'
                     : 'Bluetooth LE можно использовать для прямого соединения без общей Wi-Fi сети.', style: const TextStyle(color: mpMuted)),
-""",
-        """                Text(transport == TransportKind.wifi
+"""
+    new_hint = """                Text(transport == TransportKind.wifi
                     ? 'Устройства в одной сети обнаруживаются автоматически. На iPhone также можно подключиться напрямую по QR — это работает даже если сетевое обнаружение недоступно.'
                     : 'Bluetooth LE можно использовать для прямого соединения без общей Wi-Fi сети.', style: const TextStyle(color: mpMuted)),
-""",
-        "iPhone QR hint",
-    )
+"""
+    if old_hint in text:
+        text = text.replace(old_hint, new_hint, 1)
 
     path.write_text(text, encoding="utf-8")
     print(f"Applied NEXO v1.4.7 mobile/iPhone pairing: {path}")
