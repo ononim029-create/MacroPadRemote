@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
-      - name: Apply v1.2 Windows patches
+      - name: Apply Windows patches
         shell: pwsh
         run: |
           python tools/apply_v12_patches.py windows
@@ -48,6 +48,8 @@ jobs:
           python tools/apply_v145_windows.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/apply_v146_windows.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/apply_v147_windows.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Publish Windows x64 and native installer
         shell: pwsh
@@ -93,7 +95,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-      - name: Apply v1.4 mobile patches
+      - name: Apply mobile patches
         shell: bash
         run: |
           set -euo pipefail
@@ -115,6 +117,7 @@ jobs:
           python3 tools/apply_v144_mobile.py
           python3 tools/apply_v145_mobile.py
           python3 tools/apply_v146_mobile.py
+          python3 tools/apply_v147_mobile.py
       - name: Create Android host
         shell: bash
         run: |
@@ -175,9 +178,71 @@ jobs:
           name: NEXO-android
           path: dist/NEXO-android.apk
 
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Apply mobile patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/apply_v12_patches.py mobile
+          python3 tools/apply_v12_integration.py mobile
+          python3 tools/fix_v12_flutter.py
+          python3 tools/apply_v121_fixes.py mobile
+          python3 tools/fix_v121_layout.py
+          python3 tools/apply_v122_keyboard.py
+          python3 tools/apply_v122_profile_mobile.py
+          python3 tools/apply_v123_fixes.py mobile
+          python3 tools/apply_v124_fixes.py mobile
+          python3 tools/apply_v130_mobile.py
+          python3 tools/apply_v140_workspace.py
+          python3 tools/apply_v140_mobile.py
+          python3 tools/apply_v141_mobile.py
+          python3 tools/apply_v142_mobile.py
+          python3 tools/apply_v143_mobile.py
+          python3 tools/apply_v144_mobile.py
+          python3 tools/apply_v145_mobile.py
+          python3 tools/apply_v146_mobile.py
+          python3 tools/apply_v147_mobile.py
+      - name: Create iOS host
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build-ios
+          flutter create build-ios --platforms ios --project-name nexo
+          cp src/mobile/macropad_mobile/pubspec.yaml build-ios/pubspec.yaml
+          cp src/mobile/macropad_mobile/lib/main.dart build-ios/lib/main.dart
+          cp src/mobile/macropad_mobile/lib/v12_workspace.dart build-ios/lib/v12_workspace.dart
+          cp src/mobile/macropad_mobile/lib/v13_backup.dart build-ios/lib/v13_backup.dart
+          rm -rf build-ios/test
+          python3 tools/configure_ios_host.py build-ios
+      - name: Analyze and build unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd build-ios
+          flutter pub get
+          flutter analyze --no-fatal-infos
+          flutter build ios --release --no-codesign
+          cd ..
+          rm -rf dist/Payload
+          mkdir -p dist/Payload
+          cp -R build-ios/build/ios/iphoneos/Runner.app dist/Payload/NEXO.app
+          (cd dist && zip -qry NEXO-ios-unsigned.ipa Payload)
+          rm -rf dist/Payload
+      - uses: actions/upload-artifact@v6
+        with:
+          name: NEXO-ios
+          compression-level: 0
+          path: dist/NEXO-ios-unsigned.ipa
+
   preview:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [windows, android]
+    needs: [windows, android, ios]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v7
@@ -188,13 +253,17 @@ jobs:
         with:
           name: NEXO-android
           path: artifacts/android
+      - uses: actions/download-artifact@v7
+        with:
+          name: NEXO-ios
+          path: artifacts/ios
       - name: Make update manifest
         env:
           GH_REPO: ${{ github.repository }}
         run: |
           ZIP=artifacts/windows/NEXO-win-x64.zip
           SHA=$(sha256sum "$ZIP" | awk '{print $1}')
-          printf '%s\n' "{\"version\":\"1.4.6-preview\",\"channel\":\"preview\",\"packageUrl\":\"https://github.com/${GH_REPO}/releases/download/preview/NEXO-win-x64.zip\",\"sha256\":\"${SHA}\",\"mandatory\":false,\"notes\":\"NEXO v1.4.6: stable overlay panels, 3.5x-area model space and two-position view restore\"}" > preview.json
+          printf '%s\n' "{\"version\":\"1.4.7-preview\",\"channel\":\"preview\",\"packageUrl\":\"https://github.com/${GH_REPO}/releases/download/preview/NEXO-win-x64.zip\",\"sha256\":\"${SHA}\",\"mandatory\":false,\"notes\":\"NEXO v1.4.7: responsive laptop UI and first iPhone/iOS build\"}" > preview.json
       - name: Publish rolling preview
         env:
           GH_TOKEN: ${{ github.token }}
@@ -213,3 +282,4 @@ jobs:
 
           gh release upload preview artifacts/windows/NEXO-win-x64.zip --clobber --repo "$GH_REPO"
           gh release upload preview artifacts/android/NEXO-android.apk --clobber --repo "$GH_REPO"
+          gh release upload preview artifacts/ios/NEXO-ios-unsigned.ipa --clobber --repo "$GH_REPO"
