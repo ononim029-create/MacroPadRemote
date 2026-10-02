@@ -1,7 +1,7 @@
 name: macropad_remote
 description: MacroPad Remote phone and tablet companion
 publish_to: 'none'
-version: 1.4.6+76
+version: 1.4.7+77
 environment:
   sdk: '>=3.8.0 <4.0.0'
 dependencies:
