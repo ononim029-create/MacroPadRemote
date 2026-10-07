@@ -51,6 +51,7 @@ public partial class MainWindow
 
         var inspectorRow = ResponsiveElement<RowDefinition>("ResponsiveInspectorRow");
         var headerRow = ResponsiveElement<RowDefinition>("ResponsiveHeaderRow");
+        var profilesColumn = ResponsiveElement<ColumnDefinition>("ResponsiveProfilesColumn");
         var actionLibraryColumn = ResponsiveElement<ColumnDefinition>("ResponsiveActionLibraryColumn");
         var centerHeaderRow = ResponsiveElement<RowDefinition>("ResponsiveDeckHeaderRow");
         var centerPagerRow = ResponsiveElement<RowDefinition>("ResponsiveDeckPagerRow");
@@ -61,6 +62,7 @@ public partial class MainWindow
         if (inspectorRow is null || headerRow is null || actionLibraryColumn is null)
             return;
 
+        double profilesWidth;
         double libraryWidth;
         double inspectorHeight;
         double headerHeight;
@@ -71,6 +73,7 @@ public partial class MainWindow
 
         if (width >= 1500)
         {
+            profilesWidth = 255;
             libraryWidth = 385;
             inspectorHeight = 250;
             headerHeight = 48;
@@ -81,6 +84,7 @@ public partial class MainWindow
         }
         else if (width >= 1250)
         {
+            profilesWidth = 225;
             libraryWidth = 320;
             inspectorHeight = 220;
             headerHeight = 46;
@@ -91,6 +95,7 @@ public partial class MainWindow
         }
         else if (width >= 1020)
         {
+            profilesWidth = 205;
             libraryWidth = 275;
             inspectorHeight = 215;
             headerHeight = 44;
@@ -101,6 +106,7 @@ public partial class MainWindow
         }
         else
         {
+            profilesWidth = 180;
             libraryWidth = 225;
             inspectorHeight = 205;
             headerHeight = 42;
@@ -127,6 +133,8 @@ public partial class MainWindow
             deckPadding = new Thickness(8);
         }
 
+        if (profilesColumn is not null)
+            profilesColumn.Width = new GridLength(profilesWidth);
         actionLibraryColumn.Width = new GridLength(libraryWidth);
         inspectorRow.Height = new GridLength(inspectorHeight);
         headerRow.Height = new GridLength(headerHeight);
