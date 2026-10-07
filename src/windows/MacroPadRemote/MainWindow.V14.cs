@@ -13,18 +13,34 @@ namespace MacroPadRemote;
 
 public partial class MainWindow
 {
-    private string V14ProfilesDirectory => Path.Combine(AppContext.BaseDirectory, "Profiles");
+    private string V14ProfilesDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "MacroPadRemote",
+        "Profiles");
 
-    private List<Profile> V14LoadProfilesFromProgramFolder(List<Profile>? legacyProfiles)
+    private string V14ProfilesRecoveryPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "MacroPadRemote",
+        "profiles-recovery.json");
+
+    private IEnumerable<string> V14LegacyProfileDirectories()
     {
-        var legacy = legacyProfiles ?? new List<Profile>();
+        // v1.4.0-v1.4.7 stored profiles beside NEXO.exe. Keep reading those
+        // locations, but never use them as the primary store again.
+        yield return Path.Combine(AppContext.BaseDirectory, "Profiles");
 
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        yield return Path.Combine(localAppData, "NEXO", "Profiles");
+        yield return Path.Combine(localAppData, "MacroPadRemote", "Profiles");
+    }
+
+    private List<Profile> V14ReadProfilesFromDirectory(string directory)
+    {
+        var loaded = new List<Profile>();
         try
         {
-            Directory.CreateDirectory(V14ProfilesDirectory);
-            var loaded = new List<Profile>();
-
-            foreach (var file in Directory.EnumerateFiles(V14ProfilesDirectory, "*.nexo-profile", SearchOption.TopDirectoryOnly)
+            if (!Directory.Exists(directory)) return loaded;
+            foreach (var file in Directory.EnumerateFiles(directory, "*.nexo-profile", SearchOption.TopDirectoryOnly)
                          .OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
             {
                 try
@@ -36,33 +52,46 @@ public partial class MainWindow
                 }
                 catch
                 {
-                    // A damaged profile file must not prevent NEXO from starting.
+                    // One damaged profile must not prevent the rest from loading.
                 }
             }
-
-            if (loaded.Count > 0)
-                return loaded;
         }
         catch
         {
-            // If the program folder is temporarily unavailable, fall back to
-            // the legacy in-memory profiles rather than losing the workspace.
+            // Treat inaccessible legacy locations as empty.
         }
 
-        return legacy;
+        return loaded;
     }
 
-    private void V14PersistProfilesToProgramFolder()
+    private List<Profile> V14ReadRecoveryProfiles()
     {
-        Directory.CreateDirectory(V14ProfilesDirectory);
+        try
+        {
+            if (!File.Exists(V14ProfilesRecoveryPath)) return new List<Profile>();
+            var profiles = JsonSerializer.Deserialize<List<Profile>>(File.ReadAllText(V14ProfilesRecoveryPath), _json)
+                           ?? new List<Profile>();
+            foreach (var profile in profiles)
+                V14NormalizeProfileBindings(profile);
+            return profiles;
+        }
+        catch
+        {
+            return new List<Profile>();
+        }
+    }
 
+    private void V14WriteProfilesToDirectory(IEnumerable<Profile> profiles, string directory, bool prune)
+    {
+        Directory.CreateDirectory(directory);
         var expected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var profile in _profiles)
+
+        foreach (var profile in profiles)
         {
             var safeName = V14SafeFileName(profile.Name);
             if (safeName.Length > 72) safeName = safeName[..72];
             var fileName = $"{safeName}__{profile.Id}.nexo-profile";
-            var path = Path.Combine(V14ProfilesDirectory, fileName);
+            var path = Path.Combine(directory, fileName);
             var temp = path + ".tmp";
 
             File.WriteAllText(temp, JsonSerializer.Serialize(profile, _json));
@@ -70,7 +99,8 @@ public partial class MainWindow
             expected.Add(Path.GetFullPath(path));
         }
 
-        foreach (var file in Directory.EnumerateFiles(V14ProfilesDirectory, "*.nexo-profile", SearchOption.TopDirectoryOnly))
+        if (!prune) return;
+        foreach (var file in Directory.EnumerateFiles(directory, "*.nexo-profile", SearchOption.TopDirectoryOnly))
         {
             var full = Path.GetFullPath(file);
             if (expected.Contains(full)) continue;
@@ -78,24 +108,71 @@ public partial class MainWindow
         }
     }
 
-    private string V14SerializeStateWithoutProfiles()
+    private List<Profile> V14LoadProfilesFromProgramFolder(List<Profile>? legacyProfiles)
     {
-        var json = JsonSerializer.Serialize(_state, _json);
-        using var document = JsonDocument.Parse(json);
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
+        // 1. Permanent per-user location survives reinstall/update.
+        var stable = V14ReadProfilesFromDirectory(V14ProfilesDirectory);
+        if (stable.Count > 0)
+            return stable;
+
+        // 2. Recover profiles created by v1.4.0-v1.4.7 from old install/portable folders.
+        foreach (var candidate in V14LegacyProfileDirectories()
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            writer.WriteStartObject();
-            foreach (var property in document.RootElement.EnumerateObject())
-            {
-                if (string.Equals(property.Name, "profiles", StringComparison.OrdinalIgnoreCase))
-                    continue;
-                property.WriteTo(writer);
-            }
-            writer.WriteEndObject();
+            if (string.Equals(
+                    Path.GetFullPath(candidate).TrimEnd(Path.DirectorySeparatorChar),
+                    Path.GetFullPath(V14ProfilesDirectory).TrimEnd(Path.DirectorySeparatorChar),
+                    StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var migrated = V14ReadProfilesFromDirectory(candidate);
+            if (migrated.Count == 0) continue;
+
+            try { V14WriteProfilesToDirectory(migrated, V14ProfilesDirectory, prune: true); } catch { }
+            return migrated;
         }
 
-        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+        // 3. Recovery snapshot maintained by v1.4.8+.
+        var recovery = V14ReadRecoveryProfiles();
+        if (recovery.Count > 0)
+        {
+            try { V14WriteProfilesToDirectory(recovery, V14ProfilesDirectory, prune: true); } catch { }
+            return recovery;
+        }
+
+        // 4. Legacy presets.json from versions that still embedded profiles.
+        var legacy = legacyProfiles ?? new List<Profile>();
+        foreach (var profile in legacy)
+            V14NormalizeProfileBindings(profile);
+
+        if (legacy.Count > 0)
+        {
+            try { V14WriteProfilesToDirectory(legacy, V14ProfilesDirectory, prune: true); } catch { }
+        }
+
+        return legacy;
+    }
+
+    private void V14PersistProfilesToProgramFolder()
+    {
+        // Keep the historical method name because the v1.4 integration patch calls it,
+        // but persist only in the user data directory.
+        _state.Profiles = _profiles.ToList();
+        V14WriteProfilesToDirectory(_profiles, V14ProfilesDirectory, prune: true);
+
+        var recoveryDir = Path.GetDirectoryName(V14ProfilesRecoveryPath)!;
+        Directory.CreateDirectory(recoveryDir);
+        var temp = V14ProfilesRecoveryPath + ".tmp";
+        File.WriteAllText(temp, JsonSerializer.Serialize(_profiles.ToList(), _json));
+        File.Move(temp, V14ProfilesRecoveryPath, true);
+    }
+
+    private string V14SerializeStateWithoutProfiles()
+    {
+        // v1.4.0 removed profiles from presets.json. v1.4.8 intentionally keeps a
+        // second copy there so a damaged/missing Profiles folder cannot erase work.
+        _state.Profiles = _profiles.ToList();
+        return JsonSerializer.Serialize(_state, _json);
     }
 
     public void V14OpenSettingsWindow()
