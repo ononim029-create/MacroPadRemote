@@ -8,6 +8,15 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.security.MessageDigest;
+import java.security.cert.X509Certificate;
+import java.util.Locale;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSession;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
+import javax.net.ssl.SSLSocketFactory;
 import java.nio.charset.StandardCharsets;
 
 /** HTTPS JSON client. Tokens live only in RAM and are renewed by device-bound signatures. */
@@ -18,13 +27,50 @@ public final class NoderaApi {
     }
     private final String origin;
     private final SecureIdentity identity;
+    private final String pinnedFingerprint;
+    private final SSLSocketFactory pinnedFactory;
     private String token;
     private long expires;
 
-    public NoderaApi(String origin, SecureIdentity identity) {
+    public NoderaApi(String origin, SecureIdentity identity) { this(origin, identity, ""); }
+    public NoderaApi(String origin, SecureIdentity identity, String fingerprint) {
         if (!origin.startsWith("https://") || origin.endsWith("/")) throw new IllegalArgumentException("Invalid origin");
+        String pin = fingerprint == null ? "" : fingerprint.trim().toLowerCase(Locale.ROOT);
+        if (!pin.isEmpty() && !pin.matches("[0-9a-f]{64}")) throw new IllegalArgumentException("Недействительный TLS-отпечаток.");
         this.origin = origin;
         this.identity = identity;
+        this.pinnedFingerprint = pin;
+        this.pinnedFactory = pin.isEmpty() ? null : createPinnedFactory(pin);
+    }
+    /** Pin the exact server certificate from Windows' invitation. A matching
+     * pinned certificate is trusted even if the private server uses a self-signed
+     * identity or its LAN IP is not present in the X.509 SAN.
+     */
+    private static SSLSocketFactory createPinnedFactory(String pin) {
+        try {
+            X509TrustManager trust = new X509TrustManager() {
+                @Override public void checkClientTrusted(X509Certificate[] chain, String authType) throws java.security.cert.CertificateException {
+                    throw new java.security.cert.CertificateException("NODERA client certs not supported");
+                }
+                @Override public void checkServerTrusted(X509Certificate[] chain, String authType) throws java.security.cert.CertificateException {
+                    if (chain == null || chain.length == 0 || !matchesPin(chain[0], pin))
+                        throw new java.security.cert.CertificateException("Отпечаток TLS-сертификата не совпадает со ссылкой NODERA.");
+                    chain[0].checkValidity();
+                }
+                @Override public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+            };
+            SSLContext context = SSLContext.getInstance("TLS");
+            context.init(null, new TrustManager[]{trust}, null);
+            return context.getSocketFactory();
+        } catch (Exception e) { throw new IllegalStateException("Не удалось настроить защищённое соединение", e); }
+    }
+    private static boolean matchesPin(X509Certificate certificate, String pin) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(certificate.getEncoded());
+            byte[] expected = new byte[32];
+            for (int i = 0; i < 32; i++) expected[i] = (byte) Integer.parseInt(pin.substring(i * 2, i * 2 + 2), 16);
+            return MessageDigest.isEqual(digest, expected);
+        } catch (Exception e) { return false; }
     }
     public String origin() { return origin; }
     public synchronized JSONObject get(String path) throws Exception { return authorized("GET", path, null); }
@@ -56,6 +102,18 @@ public final class NoderaApi {
         if (!path.startsWith("/v1/") && !path.equals("/healthz")) throw new SecurityException("Unsupported API path");
         if (path.contains("#") || path.contains("\\") || path.contains("\r") || path.contains("\n") || path.startsWith("//")) throw new SecurityException("Invalid API path");
         HttpURLConnection connection = (HttpURLConnection) new URL(origin + path).openConnection();
+        if (pinnedFactory != null) {
+            HttpsURLConnection https = (HttpsURLConnection) connection;
+            https.setSSLSocketFactory(pinnedFactory);
+            // Only a matching exact certificate pin is accepted; no global SSL bypass.
+            https.setHostnameVerifier((hostname, session) -> {
+                try {
+                    java.security.cert.Certificate[] peer = session.getPeerCertificates();
+                    return peer.length > 0 && peer[0] instanceof X509Certificate &&
+                            matchesPin((X509Certificate) peer[0], pinnedFingerprint);
+                } catch (Exception e) { return false; }
+            });
+        }
         connection.setInstanceFollowRedirects(false);
         connection.setRequestMethod(method);
         connection.setConnectTimeout(8000);

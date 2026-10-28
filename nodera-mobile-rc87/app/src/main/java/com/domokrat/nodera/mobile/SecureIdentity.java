@@ -77,10 +77,17 @@ public final class SecureIdentity {
         return s.toString();
     }
     public static SecureIdentity loadOrCreate(Context context, String origin) throws Exception {
+        return loadOrCreate(context, origin, "");
+    }
+    public static SecureIdentity loadOrCreate(Context context, String origin, String serverScope) throws Exception {
         SharedPreferences prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE);
         String boundOrigin = prefs.getString("origin", "");
+        String boundScope = prefs.getString("scope", "");
         String encrypted = prefs.getString("identity", "");
-        if (origin.equals(boundOrigin) && !encrypted.isEmpty()) {
+        // The same approved phone keeps one identity across primary/LAN/VPN
+        // endpoints of one server. Do not reuse it across different servers.
+        if (!encrypted.isEmpty() && (origin.equals(boundOrigin) ||
+                (!serverScope.isEmpty() && serverScope.equals(boundScope)))) {
             // Never silently rotate an existing key: it would break server approval.
             JSONObject data = new JSONObject(new String(decrypt(Base64.decode(encrypted, Base64.DEFAULT)), StandardCharsets.UTF_8));
             return new SecureIdentity(data.getString("device_id"), data.getString("public_key"), Base64.decode(data.getString("seed"), Base64.DEFAULT));
@@ -92,7 +99,7 @@ public final class SecureIdentity {
         data.put("public_key", result.publicKey);
         data.put("seed", base64(result.seed));
         String sealed = base64(encrypt(data.toString().getBytes(StandardCharsets.UTF_8)));
-        if (!prefs.edit().putString("origin", origin).putString("identity", sealed).commit()) {
+        if (!prefs.edit().putString("origin", origin).putString("scope", serverScope).putString("identity", sealed).commit()) {
             throw new IllegalStateException("Cannot save device identity");
         }
         return result;

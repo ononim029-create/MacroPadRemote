@@ -1,7 +1,7 @@
-name: Build NODERA Mobile RC87 APK
+name: Build NODERA Mobile RC88 APK
 on:
   push:
-    branches: [build/nodera-mobile-rc87-apk]
+    branches: [build/nodera-mobile-rc88-apk]
   workflow_dispatch:
 permissions:
   contents: read
@@ -26,7 +26,7 @@ jobs:
           yes | sdkmanager --licenses > /dev/null || true
           sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'
       - name: Build Android debug APK
-        working-directory: nodera-mobile-rc87
+        working-directory: nodera-mobile-rc88
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
       - name: Verify installable APK
         run: |
@@ -54,7 +54,7 @@ jobs:
             adb shell pidof com.domokrat.nodera.mobile
       - uses: actions/upload-artifact@v4
         with:
-          name: NODERA-Mobile-RC87-APK
+          name: NODERA-Mobile-RC88-APK
           path: nodera-mobile-rc87/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7

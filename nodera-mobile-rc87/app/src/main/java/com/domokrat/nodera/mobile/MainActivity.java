@@ -28,6 +28,7 @@ import org.json.JSONObject;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -89,8 +90,11 @@ public final class MainActivity extends Activity {
         root.setFitsSystemWindows(true);
         setContentView(root);
         buildChrome();
+        String inbound = inviteFromIntent(getIntent());
         String saved = getPreferences(MODE_PRIVATE).getString("server", "");
-        if (!saved.isEmpty()) connect(saved, "", ""); else showSetup("", "");
+        if (!inbound.isEmpty()) showSetup(inbound, "Ссылка NODERA получена. Укажите ваше имя и отправьте запрос на сервер.");
+        else if (!saved.isEmpty()) connect(saved, getPreferences(MODE_PRIVATE).getString("user", ""), "");
+        else showSetup("", "");
     }
 
     private int dp(int value) { return Math.round(getResources().getDisplayMetrics().density * value); }
@@ -275,76 +279,148 @@ public final class MainActivity extends Activity {
             }
         });
     }
+    private static String inviteFromIntent(Intent intent) {
+        if (intent == null) return "";
+        if (Intent.ACTION_VIEW.equals(intent.getAction()) && intent.getData() != null) {
+            return InviteLink.extract(intent.getData().toString());
+        }
+        if (Intent.ACTION_SEND.equals(intent.getAction()) && "text/plain".equals(intent.getType())) {
+            return InviteLink.extract(intent.getStringExtra(Intent.EXTRA_TEXT));
+        }
+        return "";
+    }
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String raw = inviteFromIntent(intent);
+        if (!raw.isEmpty()) showSetup(raw, "Получено новое приглашение NODERA. Имя пользователя можно изменить.");
+    }
     private void showSetup(String initial, String info) {
         api = null;
         pending = false;
         reset("Подключение");
         LinearLayout c = card();
-        line(c, "Ваш собственный сервер", 22, TEXT, true);
-        gap(c, 12);
-        line(c, "Укажите HTTPS-адрес NODERA. Телефон должен видеть сервер по Wi-Fi или VPN.", 14, MUTED, false);
+        line(c, "Подключение по приглашению", 22, TEXT, true);
+        gap(c, 10);
+        line(c, "Вставьте ту же полную ссылку nodera://join?, которая используется на ПК. Адрес сервера и защищённое подключение считываются автоматически.", 14, MUTED, false);
         gap(c, 14);
-        EditText server = edit("https://192.168.1.10:8787", initial);
-        c.addView(server);
+        String linkPrefill = InviteLink.extract(initial);
+        EditText invite = edit("Ссылка nodera://join?", linkPrefill);
+        c.addView(invite);
         gap(c, 12);
         EditText name = edit("Ваше имя", getPreferences(MODE_PRIVATE).getString("user", ""));
         c.addView(name);
-        gap(c, 12);
-        EditText invite = edit("Приглашение (для первого подключения)", "");
-        c.addView(invite);
-        if (!info.isEmpty()) { gap(c, 12); line(c, info, 13, MUTED, false); }
-        addButton(c, "Подключиться", true, () -> connect(server.getText().toString(), name.getText().toString(), invite.getText().toString()));
-        gap(c, 16);
-        line(c, "Профиль и права назначаются на сервере. Приложение не предоставляет доступ к содержимому файлов.", 12, MUTED, false);
-    }
-    private static String inviteToken(String raw) {
-        String token = raw.trim();
-        if (token.startsWith("nodera://join?")) {
-            String value = Uri.parse(token).getQueryParameter("token");
-            return value == null ? "" : value;
+        gap(c, 8);
+        line(c, "Имя остаётся отдельным полем, как в Windows. Название сервера из ссылки его не заменяет.", 12, MUTED, false);
+        if (!linkPrefill.isEmpty()) {
+            try {
+                InviteLink parsed = InviteLink.parse(linkPrefill);
+                if (!parsed.serverName.isEmpty()) {
+                    gap(c, 12);
+                    line(c, "Сервер: " + parsed.serverName, 14, TEXT, true);
+                }
+            } catch (Exception ignored) { /* Connection shows a detailed parse error. */ }
         }
-        return token;
+        if (!info.isEmpty()) { gap(c, 12); line(c, info, 13, MUTED, false); }
+        addButton(c, "Отправить запрос", true, () -> connect("", name.getText().toString(), invite.getText().toString()));
+        gap(c, 16);
+        line(c, "Уже подключали этот телефон? После перезапуска NODERA восстановит одобренное соединение. Доступ к файлам — только для просмотра метаданных.", 12, MUTED, false);
     }
     private void connect(String input, String user, String invitation) {
-        final String url;
-        try { url = ServerAddress.mobileUrl(input); }
-        catch (IllegalArgumentException e) { error(e); return; }
-        final String newOrigin = url.substring(0, url.length() - "/mobile/".length());
-        final String token = inviteToken(invitation);
-        origin = newOrigin;
+        final InviteLink link;
+        final List<String> candidates;
+        final String fingerprint;
+        final String identityScope;
+        final String token;
+        final String name = user == null ? "" : user.trim();
+        try {
+            String complete = InviteLink.extract(invitation);
+            if (complete.isEmpty()) complete = InviteLink.extract(input);
+            if (!complete.isEmpty()) {
+                link = InviteLink.parse(complete);
+                candidates = link.controlOrigins;
+                fingerprint = link.fingerprint;
+                identityScope = link.identityScope();
+                token = link.token;
+                if (name.isEmpty()) throw new IllegalArgumentException("Введите имя пользователя.");
+            } else {
+                // Existing approved mobile identities can reconnect without another
+                // one-time invitation. First enrollment requires the full link.
+                if (!invitation.trim().isEmpty()) throw new IllegalArgumentException("Нужна полная ссылка NODERA, а не один токен.");
+                link = null;
+                String url = ServerAddress.mobileUrl(input);
+                String endpoint = url.substring(0, url.length() - "/mobile/".length());
+                String saved = getPreferences(MODE_PRIVATE).getString("server", "");
+                if (!url.equals(saved)) throw new IllegalArgumentException("Для первого подключения вставьте полную ссылку от NODERA для ПК.");
+                candidates = Collections.singletonList(endpoint);
+                fingerprint = getPreferences(MODE_PRIVATE).getString("fingerprint", "");
+                identityScope = getPreferences(MODE_PRIVATE).getString("identity_scope", "");
+                token = "";
+            }
+        } catch (IllegalArgumentException e) { error(e); return; }
         reset("Подключение");
         LinearLayout c = card();
         line(c, "Соединение с NODERA", 20, TEXT, true);
         gap(c, 12);
-        line(c, "Проверяем сервер, защищённое соединение и права устройства…", 14, MUTED, false);
+        line(c, "Проверяем адреса из приглашения и TLS-сертификат сервера. Затем отправим запрос на одобрение…", 14, MUTED, false);
         setBusy(true);
         worker.execute(() -> {
-            try {
-                SecureIdentity id = SecureIdentity.loadOrCreate(this, newOrigin);
-                NoderaApi client = new NoderaApi(newOrigin, id);
-                JSONObject health = client.publicGet("/healthz");
-                if (!"NODERA".equalsIgnoreCase(health.optString("product"))) throw new IllegalArgumentException("Адрес не принадлежит серверу NODERA.");
-                boolean approved = true;
-                JSONObject account = null;
-                try { client.authenticate(); account = client.get("/v1/me"); }
-                catch (NoderaApi.ApiException ex) { if (ex.status != 401) throw ex; approved = false; }
-                if (!approved && !token.isEmpty()) {
-                    if (user.trim().isEmpty()) throw new IllegalArgumentException("Введите имя перед отправкой приглашения.");
-                    JSONObject join = new JSONObject().put("token", token).put("submission", id.joinSubmission(user.trim()));
-                    client.publicPost("/v1/invitations/redeem", join);
-                }
-                JSONObject finalAccount = account;
-                boolean finalApproved = approved;
-                ui.post(() -> {
-                    identity = id; api = client; pending = !finalApproved;
-                    getPreferences(MODE_PRIVATE).edit().putString("server", url).putString("user", user.trim()).apply();
-                    setBusy(false);
-                    if (finalApproved) { me = finalAccount; tab = "files"; showDashboard(); }
-                    else showPending();
-                });
-            } catch (Exception e) {
-                ui.post(() -> { setBusy(false); showSetup(url, "Не удалось подключиться. Проверьте адрес, сертификат и доступность сервера."); error(e); });
+            Exception lastError = null;
+            for (String endpoint : candidates) {
+                try {
+                    SecureIdentity id = SecureIdentity.loadOrCreate(this, identityScope.isEmpty() ? endpoint : identityScope);
+                    NoderaApi client = new NoderaApi(endpoint, id, fingerprint);
+                    JSONObject health = client.publicGet("/healthz");
+                    if (!"NODERA".equalsIgnoreCase(health.optString("product")))
+                        throw new IllegalArgumentException("Адрес не принадлежит NODERA Server Root.");
+                    if (link != null && !link.serverID.isEmpty()) {
+                        JSONObject server = client.publicGet("/v1/server");
+                        if (!link.serverID.equals(server.optString("server_id")))
+                            throw new SecurityException("ID сервера не совпадает со ссылкой NODERA.");
+                    }
+                    boolean approved = true;
+                    JSONObject account = null;
+                    try { client.authenticate(); account = client.get("/v1/me"); }
+                    catch (NoderaApi.ApiException ex) {
+                        if (ex.status != 401 && ex.status != 403) throw ex;
+                        approved = false;
+                    }
+                    if (!approved && !token.isEmpty()) {
+                        JSONObject submission = id.joinSubmission(name);
+                        client.publicPost("/v1/invitations/redeem", new JSONObject().put("token", token).put("submission", submission));
+                    }
+                    if (!approved && token.isEmpty() && !getPreferences(MODE_PRIVATE).getBoolean("join_pending", false))
+                        throw new IllegalArgumentException("Устройство ещё не одобрено. Вставьте новое приглашение от администратора.");
+                    final JSONObject finalAccount = account;
+                    final boolean finalApproved = approved;
+                    final String selected = endpoint;
+                    ui.post(() -> {
+                        identity = id; api = client; origin = selected; pending = !finalApproved;
+                        getPreferences(MODE_PRIVATE).edit()
+                                .putString("server", selected + "/mobile/")
+                                .putString("user", name)
+                                .putString("fingerprint", fingerprint)
+                                .putString("identity_scope", identityScope)
+                                .putBoolean("join_pending", !finalApproved)
+                                .apply();
+                        setBusy(false);
+                        if (finalApproved) { me = finalAccount; tab = "files"; showDashboard(); }
+                        else showPending();
+                    });
+                    return;
+                } catch (SecurityException e) {
+                    lastError = e;
+                    // A wrong server ID is not a transient network failure.
+                    break;
+                } catch (Exception e) { lastError = e; }
             }
+            Exception finalError = lastError == null ? new IllegalStateException("Сервер недоступен") : lastError;
+            ui.post(() -> {
+                setBusy(false);
+                showSetup(link == null ? "" : invitation,
+                        "Не удалось связаться с сервером. Проверьте Wi-Fi/VPN. Параметры Windows Tunnel в ссылке не означают, что Android автоматически включает VPN.");
+                error(finalError);
+            });
         });
     }
     private void showPending() {
@@ -365,7 +441,8 @@ public final class MainActivity extends Activity {
             try {
                 api.authenticate();
                 JSONObject account = api.get("/v1/me");
-                ui.post(() -> { setBusy(false); pending = false; me = account; tab = "files"; showDashboard(); });
+                ui.post(() -> { setBusy(false); pending = false; me = account; tab = "files";
+                    getPreferences(MODE_PRIVATE).edit().putBoolean("join_pending", false).apply(); showDashboard(); });
             } catch (Exception e) {
                 ui.post(() -> {
                     setBusy(false);
@@ -545,20 +622,14 @@ public final class MainActivity extends Activity {
     private void createInvite(int minutes) {
         task(() -> {
             JSONObject body = new JSONObject().put("role", "employee").put("ttl_minutes", minutes).put("known_control_url", origin);
-            try { return api.post("/v1/invitations/bootstrap", body).put("_bootstrap", true); }
-            catch (NoderaApi.ApiException e) {
-                // Explicit LAN-only fallback if the server's VPN is not configured.
-                if (e.status != 409 && e.status != 500) throw e;
-                return api.post("/v1/invitations", body).put("_bootstrap", false);
-            }
+            return api.post("/v1/invitations/bootstrap", body);
         }, result -> {
-            if (result.optBoolean("_bootstrap")) {
-                generatedInvite = result.optString("link");
-                generatedInviteNote = result.optString("remote_detail", "Проверьте доступность сервера у получателя.");
-            } else {
-                generatedInvite = "nodera://join?token=" + result.optString("token");
-                generatedInviteNote = "Только токен: автоматическая настройка VPN недоступна. Передайте также адрес сервера.";
+            generatedInvite = result.optString("link");
+            if (!InviteLink.looksLikeLink(generatedInvite)) {
+                message("NODERA", "Сервер не вернул полную ссылку подключения.");
+                return;
             }
+            generatedInviteNote = result.optString("remote_detail", "Проверьте доступность сервера у получателя.");
             showInvites();
         });
     }
@@ -596,7 +667,7 @@ public final class MainActivity extends Activity {
         line(c, "Файлы остаются на сервере. Нельзя скачивать, открывать, загружать или редактировать их с телефона.", 13, MUTED, false);
         addButton(c, "Сменить сервер", false, () -> confirm("Сменить сервер?", "Для другого сервера будет создана отдельная идентичность и потребуется одобрение.", () -> {
             api = null; identity = null; origin = ""; me = new JSONObject(); folder = "/";
-            getPreferences(MODE_PRIVATE).edit().remove("server").apply();
+            getPreferences(MODE_PRIVATE).edit().remove("server").remove("fingerprint").remove("identity_scope").remove("join_pending").apply();
             showSetup("", "");
         }));
     }
