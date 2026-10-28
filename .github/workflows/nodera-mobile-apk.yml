@@ -1,7 +1,7 @@
 name: Build NODERA Mobile RC88 APK
 on:
   push:
-    branches: [build/nodera-mobile-rc87-apk]
+    branches: [build/nodera-mobile-rc88-apk]
   workflow_dispatch:
 permissions:
   contents: read
