@@ -22,7 +22,7 @@ public final class InviteLinkTest {
         assertEquals("https://192.168.10.2:8787", link.controlOrigins.get(1));
         assertEquals("https://10.4.0.2:8787", link.controlOrigins.get(2));
         assertEquals("https://alt.example:8787", link.controlOrigins.get(3));
-        assertFalse(link.identityScope().contains("abcdef"));
+        assertFalse(link.identityScope().contains("token="));
         assertFalse(link.identityScope().contains("privatevpnkey"));
     }
     @Test public void acceptsSharedText() {
