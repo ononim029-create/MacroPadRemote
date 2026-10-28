@@ -32,6 +32,13 @@ jobs:
         run: |
           test -s nodera-mobile-rc87/app/build/outputs/apk/debug/app-debug.apk
           sha256sum nodera-mobile-rc87/app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NODERA-Mobile-RC88-APK
+          path: nodera-mobile-rc87/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
       - name: Android emulator smoke test (API 29)
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -49,10 +56,3 @@ jobs:
             cat android-runtime-error.log
             ! grep -q 'FATAL EXCEPTION' android-runtime-error.log
             adb shell pidof com.domokrat.nodera.mobile
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: NODERA-Mobile-RC88-APK
-          path: nodera-mobile-rc87/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 7
