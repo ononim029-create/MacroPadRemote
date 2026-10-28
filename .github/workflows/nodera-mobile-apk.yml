@@ -32,6 +32,26 @@ jobs:
         run: |
           test -s nodera-mobile-rc87/app/build/outputs/apk/debug/app-debug.apk
           sha256sum nodera-mobile-rc87/app/build/outputs/apk/debug/app-debug.apk
+      - name: Android emulator smoke test (API 29)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: |
+            adb install -r nodera-mobile-rc87/app/build/outputs/apk/debug/app-debug.apk
+            adb logcat -c
+            adb shell am start -W -n com.domokrat.nodera.mobile/.MainActivity
+            sleep 8
+            adb logcat -d -s AndroidRuntime:E > android-runtime-error.log
+            cat android-runtime-error.log
+            if grep -q 'FATAL EXCEPTION' android-runtime-error.log; then
+              echo "NODERA Android crashed at startup"
+              exit 1
+            fi
+            adb shell pidof com.domokrat.nodera.mobile
       - uses: actions/upload-artifact@v4
         with:
           name: NODERA-Mobile-RC87-APK
