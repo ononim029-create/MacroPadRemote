@@ -1,25 +1,16 @@
 name: Build NODERA Mobile RC87 APK
 on:
   push:
-    branches:
-      - build/nodera-mobile-rc87-apk
-    paths:
-      - '.github/workflows/nodera-mobile-apk.yml'
-      - 'nodera-mobile-rc87-source.b64'
+    branches: [build/nodera-mobile-rc87-apk]
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   android:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
-      - name: Extract NODERA Android project
-        run: |
-          mkdir -p nodera-build
-          base64 --decode nodera-mobile-rc87-source.b64 > nodera-src.tar.xz
-          tar -xJf nodera-src.tar.xz -C nodera-build
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -32,16 +23,16 @@ jobs:
         run: |
           yes | sdkmanager --licenses > /dev/null || true
           sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'
-      - name: Test and build APK
-        working-directory: nodera-build
+      - name: Build Android debug APK
+        working-directory: nodera-mobile-rc87
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
-      - name: Verify APK
+      - name: Verify installable APK
         run: |
-          test -s nodera-build/app/build/outputs/apk/debug/app-debug.apk
-          sha256sum nodera-build/app/build/outputs/apk/debug/app-debug.apk
+          test -s nodera-mobile-rc87/app/build/outputs/apk/debug/app-debug.apk
+          sha256sum nodera-mobile-rc87/app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@v4
         with:
           name: NODERA-Mobile-RC87-APK
-          path: nodera-build/app/build/outputs/apk/debug/app-debug.apk
+          path: nodera-mobile-rc87/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7

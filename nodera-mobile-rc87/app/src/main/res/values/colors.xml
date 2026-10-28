@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="nodera_background">#081625</color>
+    <color name="nodera_panel">#13283B</color>
+    <color name="nodera_blue">#2289F4</color>
+    <color name="nodera_text">#F0F7FF</color>
+    <color name="nodera_muted">#B3C8D8</color>
+    <color name="nodera_border">#38566D</color>
+    <color name="nodera_error">#FF8790</color>
+</resources>

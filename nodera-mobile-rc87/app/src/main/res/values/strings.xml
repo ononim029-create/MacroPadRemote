@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NODERA Mobile</string>
+    <string name="server_address">Адрес сервера NODERA</string>
+    <string name="server_hint">https://server.example:8787</string>
+    <string name="connect">Подключиться</string>
+    <string name="switch_server">Сервер</string>
+    <string name="refresh">Обновить</string>
+    <string name="retry">Повторить</string>
+    <string name="welcome">Ваш собственный сервер</string>
+    <string name="intro">Управляйте запросами на подключение и назначайте права с телефона.</string>
+    <string name="security_hint">Требуется HTTPS с доверенным сертификатом. Для подключения вне локальной сети используйте VPN.</string>
+    <string name="checking">Подключаемся к серверу…</string>
+    <string name="error_title">Не удалось подключиться</string>
+</resources>
